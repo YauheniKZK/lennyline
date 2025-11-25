@@ -32,20 +32,24 @@ class Particle {
     this.gravity = 0.1;
   }
 
-  update() {
-    // Применяем гравитацию
-    this.vy += this.gravity;
+  update(deltaTime) {
+    // Нормализуем deltaTime для 60 FPS (16.67ms на кадр)
+    const normalizedDelta = deltaTime / 16.67;
+    
+    // Применяем гравитацию (независимо от FPS)
+    this.vy += this.gravity * normalizedDelta;
 
-    // Обновляем позицию
-    this.x += this.vx;
-    this.y += this.vy;
+    // Обновляем позицию (независимо от FPS)
+    this.x += this.vx * normalizedDelta;
+    this.y += this.vy * normalizedDelta;
 
-    // Уменьшаем время жизни
-    this.life -= this.decay;
+    // Уменьшаем время жизни (независимо от FPS)
+    this.life -= this.decay * normalizedDelta;
 
-    // Замедляем частицы
-    this.vx *= 0.98;
-    this.vy *= 0.98;
+    // Замедляем частицы (независимо от FPS)
+    const slowdownFactor = Math.pow(0.98, normalizedDelta);
+    this.vx *= slowdownFactor;
+    this.vy *= slowdownFactor;
 
     // Возвращаем true, если частица еще жива
     return this.life > 0;
@@ -81,13 +85,13 @@ class ParticleManager {
     }
   }
 
-  // Обновление всех частиц
-  update() {
+  // Обновление всех частиц (deltaTime в миллисекундах)
+  update(deltaTime) {
     // Оптимизация: используем цикл for вместо filter для лучшей производительности
     let writeIndex = 0;
     for (let i = 0; i < this.particles.length; i++) {
       const particle = this.particles[i];
-      if (particle.update()) {
+      if (particle.update(deltaTime)) {
         this.particles[writeIndex++] = particle;
       }
     }
@@ -127,11 +131,14 @@ class Square {
     this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
   }
 
-  // Обновление позиции
-  update(squares) {
-    // Обновляем позицию
-    this.x += this.vx;
-    this.y += this.vy;
+  // Обновление позиции (deltaTime в миллисекундах)
+  update(squares, deltaTime) {
+    // Нормализуем deltaTime для 60 FPS (16.67ms на кадр)
+    const normalizedDelta = deltaTime / 16.67;
+    
+    // Обновляем позицию (скорость независима от FPS)
+    this.x += this.vx * normalizedDelta;
+    this.y += this.vy * normalizedDelta;
 
     // Отскок от краев canvas
     if (this.x <= 0 || this.x + this.size >= this.canvas.width) {
@@ -351,11 +358,11 @@ class SquareGenerator {
     }
   }
 
-  // Обновление всех квадратов
-  update() {
+  // Обновление всех квадратов (deltaTime в миллисекундах)
+  update(deltaTime) {
     // Оптимизация: обновляем квадраты в одном цикле
     for (let i = 0; i < this.squares.length; i++) {
-      this.squares[i].update(this.squares);
+      this.squares[i].update(this.squares, deltaTime);
     }
   }
 
@@ -456,13 +463,16 @@ class Obstacle {
     this.color = "#333333";
   }
 
-  // Обновление позиции
-  update() {
-    // Двигаем линию вниз
-    this.y += this.verticalSpeed;
+  // Обновление позиции (deltaTime в миллисекундах)
+  update(deltaTime) {
+    // Нормализуем deltaTime для 60 FPS (16.67ms на кадр)
+    const normalizedDelta = deltaTime / 16.67;
+    
+    // Двигаем линию вниз (скорость независима от FPS)
+    this.y += this.verticalSpeed * normalizedDelta;
 
-    // Двигаем дырку влево-вправо
-    this.holeX += this.holeSpeed * this.holeDirection;
+    // Двигаем дырку влево-вправо (скорость независима от FPS)
+    this.holeX += this.holeSpeed * this.holeDirection * normalizedDelta;
 
     // Отскок дырки от краев
     const halfHole = this.holeSize / 2;
@@ -561,22 +571,33 @@ class ObstacleGenerator {
 
     this.obstacles = [];
     this.lastSpawnTime = 0;
+    this.lastUpdateTime = 0;
+    this.passedObstacles = new Set(); // Множество пройденных препятствий (чтобы не засчитывать дважды)
   }
 
   // Обновление
-  update(currentTime) {
+  update(currentTime, deltaTime) {
     // Генерируем новые препятствия
     if (currentTime - this.lastSpawnTime >= this.config.spawnInterval) {
       this.spawn();
       this.lastSpawnTime = currentTime;
     }
 
-    // Обновляем существующие препятствия
+    // Обновляем существующие препятствия с deltaTime
     this.obstacles.forEach((obstacle) => {
-      obstacle.update();
+      obstacle.update(deltaTime);
     });
 
     // Удаляем препятствия, вышедшие за экран
+    const removedObstacles = this.obstacles.filter(
+      (obstacle) => obstacle.isOffScreen()
+    );
+    
+    // Удаляем ID удаленных препятствий из passedObstacles
+    removedObstacles.forEach((obstacle) => {
+      this.passedObstacles.delete(obstacle.getId());
+    });
+    
     this.obstacles = this.obstacles.filter(
       (obstacle) => !obstacle.isOffScreen()
     );
@@ -598,6 +619,24 @@ class ObstacleGenerator {
     );
 
     this.obstacles.push(obstacle);
+  }
+
+  // Подсчет пройденных препятствий (возвращает количество новых пройденных)
+  countPassedObstacles(player) {
+    let newPassedCount = 0;
+    const playerBottom = player.y + player.height;
+
+    for (const obstacle of this.obstacles) {
+      const obstacleId = obstacle.getId();
+      
+      // Если препятствие прошло ниже персонажа и еще не было засчитано
+      if (obstacle.y > playerBottom && !this.passedObstacles.has(obstacleId)) {
+        this.passedObstacles.add(obstacleId);
+        newPassedCount++;
+      }
+    }
+
+    return newPassedCount;
   }
 
   // Проверка столкновений с персонажем (возвращает true если здоровье <= 0 после получения урона)
@@ -653,6 +692,7 @@ class ObstacleGenerator {
   clear() {
     this.obstacles = [];
     this.lastSpawnTime = 0;
+    this.passedObstacles.clear();
   }
 }
 
@@ -760,8 +800,8 @@ class Player {
     this.wasInAir = true; // Отмечаем, что персонаж был в воздухе
   }
 
-  // Обновление позиции
-  update() {
+  // Обновление позиции (deltaTime в миллисекундах)
+  update(deltaTime) {
     // Обновляем анимацию сотрясения
     this.updateShake();
 
@@ -770,11 +810,14 @@ class Player {
       return false;
     }
 
-    // Применяем гравитацию
-    this.velocityY += this.gravity;
+    // Нормализуем deltaTime для 60 FPS (16.67ms на кадр)
+    const normalizedDelta = deltaTime / 16.67;
 
-    // Обновляем позицию
-    this.y += this.velocityY;
+    // Применяем гравитацию (независимо от FPS)
+    this.velocityY += this.gravity * normalizedDelta;
+
+    // Обновляем позицию (независимо от FPS)
+    this.y += this.velocityY * normalizedDelta;
 
     // Проверяем столкновение с землей
     if (this.y >= this.groundY) {
@@ -908,12 +951,28 @@ function Game() {
     const HEALTH_UPDATE_INTERVAL = 100; // Обновляем здоровье не чаще раз в 100мс
     let cachedHealth = 0;
     
+    // Для расчета deltaTime
+    let lastFrameTime = performance.now();
+    
     // Оптимизация canvas для мобильных устройств
     ctx.imageSmoothingEnabled = false; // Отключаем сглаживание для лучшей производительности
     
     // Функция отрисовки
     const render = () => {
       const currentTime = performance.now();
+      
+      // Вычисляем deltaTime (время между кадрами в миллисекундах)
+      let deltaTime = currentTime - lastFrameTime;
+      lastFrameTime = currentTime;
+      
+      // Ограничиваем deltaTime для предотвращения больших скачков
+      // (например, когда вкладка была неактивна)
+      if (deltaTime > 100) {
+        deltaTime = 100; // Максимум 100мс (10 FPS минимум)
+      }
+      if (deltaTime < 1) {
+        deltaTime = 1; // Минимум 1мс
+      }
 
       // Очистка canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -926,7 +985,17 @@ function Game() {
       ) {
         // Обновляем время игры только когда игра запущена
         gameTimeRef.current = currentTime;
-        obstacleGeneratorRef.current.update(currentTime);
+        obstacleGeneratorRef.current.update(currentTime, deltaTime);
+        
+        // Подсчитываем пройденные препятствия и увеличиваем счет
+        if (playerRef.current) {
+          const passedCount = obstacleGeneratorRef.current.countPassedObstacles(
+            playerRef.current
+          );
+          if (passedCount > 0) {
+            setScore((prev) => prev + passedCount);
+          }
+        }
       }
 
       // Обновление и отрисовка персонажа (только если игра запущена)
@@ -935,7 +1004,7 @@ function Game() {
         isGameStartedRef.current &&
         !isGameOverRef.current
       ) {
-        const hitGround = playerRef.current.update();
+        const hitGround = playerRef.current.update(deltaTime);
         // Столкновение с землей всегда заканчивает игру
         if (hitGround === "ground") {
           setIsGameOver(true);
@@ -957,7 +1026,7 @@ function Game() {
 
       // Обновление квадратов (всегда, даже если игра не запущена)
       if (squareGeneratorRef.current) {
-        squareGeneratorRef.current.update();
+        squareGeneratorRef.current.update(deltaTime);
       }
 
       // Проверка столкновений персонажа с квадратами (только если игра запущена)
@@ -991,7 +1060,7 @@ function Game() {
 
       // Обновление частиц
       if (particleManagerRef.current) {
-        particleManagerRef.current.update();
+        particleManagerRef.current.update(deltaTime);
       }
 
       // Отрисовка препятствий (внизу, под всем)
@@ -1040,7 +1109,7 @@ function Game() {
     if (playerRef.current) {
       playerRef.current.jump();
     }
-    setScore((prev) => prev + 1);
+    // Счет теперь считается по пройденным линиям, а не по тапам
   };
 
   const handleStart = () => {

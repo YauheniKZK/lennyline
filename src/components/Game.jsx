@@ -9,6 +9,9 @@ const APP_VERSION = packageJson.version;
 
 function Game() {
   const [isViewerStarted, setIsViewerStarted] = useState(false);
+  const [selectedPart, setSelectedPart] = useState(null);
+  const [clickedPartInfo, setClickedPartInfo] = useState(null);
+
   // URL 3D модели - можно указать путь к модели в public/models/
   // Примеры:
   // - "/models/your-model.glb" - если модель в public/models/
@@ -20,14 +23,15 @@ function Game() {
     setIsViewerStarted(true);
   };
 
-  // Функция для загрузки модели из файла (опционально)
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if ((file && file.name.endsWith(".glb")) || file.name.endsWith(".gltf")) {
-      const url = URL.createObjectURL(file);
-      // Можно использовать setModelUrl(url) если добавить состояние
-      console.log("Модель загружена:", file.name);
-    }
+  // Обработчик клика по части модели
+  const handlePartClick = (partName, intersect) => {
+    setSelectedPart(partName);
+    setClickedPartInfo({
+      name: partName,
+      position: intersect.point,
+      distance: intersect.distance,
+    });
+    console.log("Клик по части:", partName, intersect);
   };
 
   return (
@@ -41,7 +45,31 @@ function Game() {
 
       <div className="game-area">
         {isViewerStarted ? (
-          <ModelViewer modelUrl={modelUrl} />
+          <>
+            <ModelViewer
+              modelUrl={modelUrl}
+              onPartClick={handlePartClick}
+              selectedPart={selectedPart}
+            />
+            {/* Информация о выбранной части */}
+            {clickedPartInfo && (
+              <div className="part-info">
+                <div className="part-info-content">
+                  <h3>Выбранная часть:</h3>
+                  <p className="part-name">{clickedPartInfo.name}</p>
+                  <button
+                    className="part-info-close"
+                    onClick={() => {
+                      setSelectedPart(null);
+                      setClickedPartInfo(null);
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <GameMenu onStart={handleStart} />
         )}

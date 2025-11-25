@@ -83,3 +83,79 @@
   image-rendering: optimizeSpeed;
   -webkit-font-smoothing: antialiased;
 }
+
+/* Информация о выбранной части модели */
+.part-info {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  min-width: 200px;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.part-info-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.part-info h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #666666;
+  font-weight: 500;
+}
+
+.part-name {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #3390ec;
+  font-weight: 600;
+}
+
+.part-info-close {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: #ff4444;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s;
+}
+
+.part-info-close:hover {
+  transform: scale(1.1);
+}
+
+.part-info-close:active {
+  transform: scale(0.95);
+}

@@ -11,6 +11,10 @@ function Game() {
   const [isViewerStarted, setIsViewerStarted] = useState(false);
   const [selectedPart, setSelectedPart] = useState(null);
   const [clickedPartInfo, setClickedPartInfo] = useState(null);
+  // Map для хранения URL изображений для каждого сегмента
+  // Ключ: название сегмента (например, "Передняя - Сегмент (1,1)")
+  // Значение: URL изображения
+  const [segmentTextures, setSegmentTextures] = useState(new Map());
 
   // URL 3D модели - можно указать путь к модели в public/models/
   // Примеры:
@@ -34,6 +38,25 @@ function Game() {
     console.log("Клик по части:", partName, intersect);
   };
 
+  // Обработчик загрузки изображения для выбранного сегмента
+  const handleImageUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file || !selectedPart) return;
+
+    // Создаем URL для загруженного файла
+    const imageUrl = URL.createObjectURL(file);
+
+    // Обновляем Map с текстурами
+    setSegmentTextures((prev) => {
+      const newMap = new Map(prev);
+      newMap.set(selectedPart, imageUrl);
+      return newMap;
+    });
+
+    // Очищаем input
+    event.target.value = "";
+  };
+
   return (
     <div className="game-container">
       <div className="game-header">
@@ -50,6 +73,7 @@ function Game() {
               modelUrl={modelUrl}
               onPartClick={handlePartClick}
               selectedPart={selectedPart}
+              segmentTextures={segmentTextures}
             />
             {/* Информация о выбранной части */}
             {clickedPartInfo && (
@@ -57,6 +81,15 @@ function Game() {
                 <div className="part-info-content">
                   <h3>Выбранная часть:</h3>
                   <p className="part-name">{clickedPartInfo.name}</p>
+                  <label className="image-upload-label">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      style={{ display: "none" }}
+                    />
+                    Загрузить изображение
+                  </label>
                   <button
                     className="part-info-close"
                     onClick={() => {

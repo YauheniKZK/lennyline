@@ -149,3 +149,20 @@
 .part-info-close:active {
   transform: scale(0.95);
 }
+
+.image-upload-label {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: #3390ec;
+  color: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  text-align: center;
+  transition: background 0.2s;
+}
+
+.image-upload-label:hover {
+  background: #0066cc;
+}

@@ -136,14 +136,17 @@ function CubeSegment({
   rotation,
   segmentSize,
   onPartClick, 
-  selectedPart 
+  selectedPart,
+  segmentTextures // Map с URL изображений для сегментов
 }) {
   const [hovered, setHovered] = useState(false);
+  const [texture, setTexture] = useState(null);
   const segmentRef = useRef();
   const materialRef = useRef();
   
   // Название сегмента: например, "Передняя - Сегмент (1,1)"
   const segmentName = `${sideName} - Сегмент (${row + 1},${col + 1})`;
+  const textureUrl = segmentTextures?.get(segmentName);
 
   useEffect(() => {
     if (segmentRef.current) {
@@ -152,9 +155,47 @@ function CubeSegment({
     }
   }, [segmentName]);
 
+  // Загружаем текстуру, если она есть для этого сегмента
+  useEffect(() => {
+    let currentTexture = null;
+
+    if (textureUrl) {
+      const loader = new THREE.TextureLoader();
+      loader.load(
+        textureUrl,
+        (loadedTexture) => {
+          currentTexture = loadedTexture;
+          setTexture(loadedTexture);
+          if (materialRef.current) {
+            materialRef.current.map = loadedTexture;
+            materialRef.current.needsUpdate = true;
+          }
+        },
+        undefined,
+        (error) => {
+          console.error(`Ошибка загрузки текстуры для ${segmentName}:`, error);
+        }
+      );
+    } else {
+      setTexture(null);
+      if (materialRef.current) {
+        materialRef.current.map = null;
+        materialRef.current.needsUpdate = true;
+      }
+    }
+
+    // Очистка при размонтировании или изменении URL
+    return () => {
+      if (currentTexture) {
+        currentTexture.dispose();
+      }
+    };
+  }, [textureUrl, segmentName]);
+
   // Обновляем цвет материала напрямую, не создавая новый материал
   useEffect(() => {
-    if (materialRef.current) {
+    if (materialRef.current && !texture) {
+      // Меняем цвет только если нет текстуры
       if (selectedPart === segmentName) {
         materialRef.current.color.setHex(0x0066cc);
       } else if (hovered) {
@@ -162,8 +203,11 @@ function CubeSegment({
       } else {
         materialRef.current.color.setHex(0x3390ec);
       }
+    } else if (materialRef.current && texture) {
+      // Если есть текстура, используем белый цвет чтобы текстура отображалась корректно
+      materialRef.current.color.setHex(0xffffff);
     }
-  }, [selectedPart, hovered, segmentName]);
+  }, [selectedPart, hovered, segmentName, texture]);
 
   const handleClick = (e) => {
     e.stopPropagation();
@@ -199,6 +243,7 @@ function CubeSegment({
         color={0x3390ec}
         side={THREE.DoubleSide}
         wireframe={false}
+        map={texture}
       />
     </mesh>
   );
@@ -211,7 +256,8 @@ function CubeSide({
   rotation, 
   onPartClick, 
   selectedPart,
-  segmentsPerSide = 10 // Количество сегментов по одной стороне (10x10 = 100 сегментов)
+  segmentsPerSide = 10, // Количество сегментов по одной стороне (10x10 = 100 сегментов)
+  segmentTextures // Map с URL изображений для сегментов
 }) {
   const size = 2; // Размер стороны куба
   const segmentSize = size / segmentsPerSide; // Размер одного сегмента
@@ -240,6 +286,7 @@ function CubeSide({
           segmentSize={segmentSize}
           onPartClick={onPartClick}
           selectedPart={selectedPart}
+          segmentTextures={segmentTextures}
         />
       );
     }
@@ -254,7 +301,7 @@ function CubeSide({
 }
 
 // Кликабельный куб, состоящий из 6 отдельных сторон
-function ClickableBox({ onPartClick, selectedPart }) {
+function ClickableBox({ onPartClick, selectedPart, segmentTextures }) {
   const size = 2;
   const halfSize = size / 2;
 
@@ -303,6 +350,7 @@ function ClickableBox({ onPartClick, selectedPart }) {
           onPartClick={onPartClick}
           selectedPart={selectedPart}
           segmentsPerSide={10}
+          segmentTextures={segmentTextures}
         />
       ))}
     </group>
@@ -327,7 +375,7 @@ function BackgroundColor() {
 }
 
 // Компонент для отображения сцены
-function Scene({ modelUrl, onPartClick, selectedPart }) {
+function Scene({ modelUrl, onPartClick, selectedPart, segmentTextures }) {
   return (
     <>
       {/* Фиксированный цвет фона сцены */}
@@ -353,6 +401,7 @@ function Scene({ modelUrl, onPartClick, selectedPart }) {
         <ClickableBox 
           onPartClick={onPartClick}
           selectedPart={selectedPart}
+          segmentTextures={segmentTextures}
         />
       )}
 
@@ -371,7 +420,7 @@ function Scene({ modelUrl, onPartClick, selectedPart }) {
   );
 }
 
-function ModelViewer({ modelUrl, onPartClick, selectedPart }) {
+function ModelViewer({ modelUrl, onPartClick, selectedPart, segmentTextures }) {
   return (
     <div className="model-viewer-container">
       <Canvas
@@ -388,7 +437,12 @@ function ModelViewer({ modelUrl, onPartClick, selectedPart }) {
           gl.autoClear = true;
         }}
       >
-        <Scene modelUrl={modelUrl} onPartClick={onPartClick} selectedPart={selectedPart} />
+        <Scene 
+          modelUrl={modelUrl} 
+          onPartClick={onPartClick} 
+          selectedPart={selectedPart}
+          segmentTextures={segmentTextures}
+        />
       </Canvas>
     </div>
   );

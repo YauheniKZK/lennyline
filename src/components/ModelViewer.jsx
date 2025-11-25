@@ -413,8 +413,8 @@ function Scene({ modelUrl, onPartClick, selectedPart, segmentTextures }) {
         enableZoom={true}
         enablePan={true}
         enableRotate={true}
-        minDistance={3}
-        maxDistance={10}
+        minDistance={0.3}
+        maxDistance={15}
       />
     </>
   );
@@ -424,7 +424,7 @@ function ModelViewer({ modelUrl, onPartClick, selectedPart, segmentTextures }) {
   return (
     <div className="model-viewer-container">
       <Canvas
-        camera={{ position: [0, 0, 5], fov: 50 }}
+        camera={{ position: [0, 0, 3.5], fov: 50 }}
         style={{ width: "100%", height: "100%", background: "#ffffff" }}
         gl={{ 
           preserveDrawingBuffer: false,

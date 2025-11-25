@@ -891,11 +891,31 @@ function Game() {
 
     const ctx = canvas.getContext("2d");
 
-    // Установка размеров canvas
+    // Фиксированное внутреннее разрешение игры (логические единицы)
+    const GAME_WIDTH = 375; // Ширина игры в логических пикселях
+    const GAME_HEIGHT = 667; // Высота игры в логических пикселях (соотношение iPhone)
+    
+    // Установка размеров canvas с нормализацией
     const resizeCanvas = () => {
       const container = canvas.parentElement;
-      canvas.width = container.clientWidth;
-      canvas.height = container.clientHeight;
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+      
+      // Вычисляем масштаб для сохранения пропорций
+      const scaleX = containerWidth / GAME_WIDTH;
+      const scaleY = containerHeight / GAME_HEIGHT;
+      const scale = Math.min(scaleX, scaleY); // Берем меньший масштаб для сохранения пропорций
+      
+      // Устанавливаем размеры canvas (внутреннее разрешение игры)
+      canvas.width = GAME_WIDTH;
+      canvas.height = GAME_HEIGHT;
+      
+      // Масштабируем отображение CSS для нормализации
+      const scaledWidth = GAME_WIDTH * scale;
+      const scaledHeight = GAME_HEIGHT * scale;
+      canvas.style.width = `${scaledWidth}px`;
+      canvas.style.height = `${scaledHeight}px`;
+      canvas.style.imageRendering = 'pixelated'; // Четкое отображение пикселей
 
       // Обновляем позицию персонажа при изменении размера
       if (playerRef.current) {

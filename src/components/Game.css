@@ -91,23 +91,13 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 200;
-  background: rgba(255, 255, 255, 0.95);
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
   border-radius: 12px;
   padding: 1rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   min-width: 200px;
-  animation: slideUp 0.3s ease-out;
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
+  /* Убираем анимацию для предотвращения визуальных эффектов */
 }
 
 .part-info-content {

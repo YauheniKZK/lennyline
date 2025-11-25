@@ -71,14 +71,25 @@
   cursor: pointer;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
-  touch-action: none;
+  touch-action: none; /* Отключаем стандартные жесты для максимальной отзывчивости */
+  -webkit-touch-callout: none; /* Отключаем контекстное меню на iOS */
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Оптимизация для лучшей отзывчивости касаний */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  will-change: contents; /* Подсказка браузеру для оптимизации */
 }
 
 .game-canvas {
   display: block;
   background: #ffffff;
   /* Центрирование через flex в game-area */
+  touch-action: none; /* Отключаем стандартные жесты на canvas */
+  pointer-events: auto; /* Включаем обработку событий */
+  /* Оптимизация для лучшей производительности */
+  image-rendering: optimizeSpeed;
+  -webkit-font-smoothing: antialiased;
 }

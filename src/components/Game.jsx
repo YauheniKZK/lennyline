@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import "./Game.css";
 import GameMenu from "./GameMenu";
+import packageJson from "../../package.json";
 
-// Версия приложения (из package.json через Vite define)
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.0.1";
+// Версия приложения (из package.json)
+const APP_VERSION = packageJson.version;
 
 // Класс частицы
 class Particle {
@@ -1143,14 +1144,52 @@ function Game() {
     };
   }, []);
 
-  const handleTap = () => {
-    if (!isGameStarted || isGameOver) return;
-    // Персонаж прыгает при тапе
-    if (playerRef.current) {
+  // Оптимизированная функция прыжка (мемоизирована)
+  const performJump = useCallback(() => {
+    // Мгновенная реакция без requestAnimationFrame для максимальной отзывчивости
+    if (
+      playerRef.current &&
+      isGameStartedRef.current &&
+      !isGameOverRef.current
+    ) {
       playerRef.current.jump();
     }
-    // Счет теперь считается по пройденным линиям, а не по тапам
-  };
+  }, []);
+
+  // Обработчик кликов (для десктопа и мыши) - оптимизирован
+  const handleTap = useCallback(() => {
+    if (!isGameStarted || isGameOver) return;
+    performJump();
+  }, [isGameStarted, isGameOver, performJump]);
+
+  // Обработчик touch событий для мультитач (оптимизированный)
+  const handleTouchStart = useCallback(
+    (e) => {
+      if (!isGameStarted || isGameOver) return;
+
+      // Предотвращаем стандартное поведение (скролл, масштаб) для лучшей отзывчивости
+      e.preventDefault();
+
+      // Обрабатываем каждое касание (мультитач) - каждое касание = прыжок
+      // Используем e.changedTouches для получения всех новых касаний
+      const touches = e.changedTouches;
+      for (let i = 0; i < touches.length; i++) {
+        performJump();
+      }
+    },
+    [isGameStarted, isGameOver, performJump]
+  );
+
+  // Обработчик для предотвращения скролла и масштабирования
+  const handleTouchMove = useCallback((e) => {
+    // Предотвращаем скролл и масштаб
+    e.preventDefault();
+  }, []);
+
+  // Обработчик для предотвращения стандартного поведения при окончании касания
+  const handleTouchEnd = useCallback((e) => {
+    e.preventDefault();
+  }, []);
 
   const handleStart = () => {
     if (playerRef.current) {
@@ -1192,7 +1231,13 @@ function Game() {
         </div>
       </div>
 
-      <div className="game-area" onClick={handleTap}>
+      <div
+        className="game-area"
+        onClick={handleTap}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
         <canvas ref={canvasRef} className="game-canvas" />
         {(!isGameStarted || isGameOver) && <GameMenu onStart={handleStart} />}
       </div>

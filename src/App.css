@@ -5,4 +5,8 @@
   padding: 0;
   overflow: hidden;
   background: #ffffff;
+  /* Предотвращаем pull-to-refresh и закрытие при свайпе вниз */
+  overscroll-behavior-y: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }

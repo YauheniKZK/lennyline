@@ -1,12 +1,9 @@
 # Dependencies
 node_modules/
-client/node_modules/
 
 # Build outputs
 dist/
-client/dist/
 dist-ssr/
-client/dist-ssr/
 
 # Logs
 logs
@@ -36,4 +33,3 @@ lerna-debug.log*
 
 # OS files
 Thumbs.db
-

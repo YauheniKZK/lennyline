@@ -890,6 +890,9 @@ function Game() {
   const isGameStartedRef = useRef(false);
   const isGameOverRef = useRef(false);
   const gameTimeRef = useRef(0);
+  // Флаги для предотвращения двойных кликов (touch + click)
+  const touchHandledRef = useRef(false);
+  const lastJumpTimeRef = useRef(0);
   const [score, setScore] = useState(0);
   const [health, setHealth] = useState(0);
   const [isGameStarted, setIsGameStarted] = useState(false);
@@ -1145,7 +1148,15 @@ function Game() {
   }, []);
 
   // Оптимизированная функция прыжка (мемоизирована)
+  const JUMP_COOLDOWN = 50; // Минимальная задержка между прыжками в мс
   const performJump = useCallback(() => {
+    const now = Date.now();
+    // Проверяем cooldown для предотвращения слишком частых прыжков
+    if (now - lastJumpTimeRef.current < JUMP_COOLDOWN) {
+      return;
+    }
+    lastJumpTimeRef.current = now;
+
     // Мгновенная реакция без requestAnimationFrame для максимальной отзывчивости
     if (
       playerRef.current &&
@@ -1166,6 +1177,13 @@ function Game() {
       ) {
         return;
       }
+
+      // Если touch-событие уже обработано - игнорируем click (предотвращаем двойной клик)
+      if (touchHandledRef.current) {
+        touchHandledRef.current = false;
+        return;
+      }
+
       if (!isGameStarted || isGameOver) return;
       performJump();
     },
@@ -1188,11 +1206,32 @@ function Game() {
       // Предотвращаем стандартное поведение (скролл, масштаб) для лучшей отзывчивости
       e.preventDefault();
 
-      // Обрабатываем каждое касание (мультитач) - каждое касание = прыжок
+      // Помечаем, что touch-событие обработано, чтобы предотвратить последующий click
+      touchHandledRef.current = true;
+
+      // Сбрасываем флаг через небольшую задержку
+      setTimeout(() => {
+        touchHandledRef.current = false;
+      }, 300);
+
+      // Обрабатываем каждое новое касание (мультитач)
+      // Каждое новое касание = один прыжок
       // Используем e.changedTouches для получения всех новых касаний
       const touches = e.changedTouches;
-      for (let i = 0; i < touches.length; i++) {
-        performJump();
+      const touchCount = touches.length;
+
+      // Если несколько касаний одновременно - делаем столько прыжков, сколько касаний
+      // Но с небольшой задержкой между ними для мультитач
+      for (let i = 0; i < touchCount; i++) {
+        if (i === 0) {
+          // Первое касание - сразу
+          performJump();
+        } else {
+          // Остальные касания - с небольшой задержкой для мультитач
+          setTimeout(() => {
+            performJump();
+          }, i * 10); // 10мс между каждым касанием
+        }
       }
     },
     [isGameStarted, isGameOver, performJump]

@@ -211,7 +211,7 @@ function CubeSide({
   rotation, 
   onPartClick, 
   selectedPart,
-  segmentsPerSide = 3 // Количество сегментов по одной стороне (3x3 = 9 сегментов)
+  segmentsPerSide = 10 // Количество сегментов по одной стороне (10x10 = 100 сегментов)
 }) {
   const size = 2; // Размер стороны куба
   const segmentSize = size / segmentsPerSide; // Размер одного сегмента
@@ -302,6 +302,7 @@ function ClickableBox({ onPartClick, selectedPart }) {
           rotation={side.rotation}
           onPartClick={onPartClick}
           selectedPart={selectedPart}
+          segmentsPerSide={10}
         />
       ))}
     </group>

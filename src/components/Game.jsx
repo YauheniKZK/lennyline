@@ -1157,14 +1157,32 @@ function Game() {
   }, []);
 
   // Обработчик кликов (для десктопа и мыши) - оптимизирован
-  const handleTap = useCallback(() => {
-    if (!isGameStarted || isGameOver) return;
-    performJump();
-  }, [isGameStarted, isGameOver, performJump]);
+  const handleTap = useCallback(
+    (e) => {
+      // Если клик по меню или кнопке - игнорируем
+      if (
+        e.target.closest(".game-menu") ||
+        e.target.closest(".game-menu-button")
+      ) {
+        return;
+      }
+      if (!isGameStarted || isGameOver) return;
+      performJump();
+    },
+    [isGameStarted, isGameOver, performJump]
+  );
 
   // Обработчик touch событий для мультитач (оптимизированный)
   const handleTouchStart = useCallback(
     (e) => {
+      // Если касание по меню или кнопке - не предотвращаем стандартное поведение
+      if (
+        e.target.closest(".game-menu") ||
+        e.target.closest(".game-menu-button")
+      ) {
+        return;
+      }
+
       if (!isGameStarted || isGameOver) return;
 
       // Предотвращаем стандартное поведение (скролл, масштаб) для лучшей отзывчивости
@@ -1188,6 +1206,13 @@ function Game() {
 
   // Обработчик для предотвращения стандартного поведения при окончании касания
   const handleTouchEnd = useCallback((e) => {
+    // Если касание по меню или кнопке - не предотвращаем стандартное поведение
+    if (
+      e.target.closest(".game-menu") ||
+      e.target.closest(".game-menu-button")
+    ) {
+      return;
+    }
     e.preventDefault();
   }, []);
 

@@ -23,11 +23,24 @@
   z-index: 100;
 }
 
+.game-title-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
 .game-title {
   font-size: 1.5rem;
   font-weight: 600;
   margin: 0;
   color: var(--tg-theme-text-color, #000000);
+  line-height: 1;
+}
+
+.game-version {
+  font-size: 0.7rem;
+  color: var(--tg-theme-hint-color, #999999);
+  opacity: 0.7;
 }
 
 .game-stats {
@@ -69,4 +82,3 @@
   background: var(--tg-theme-bg-color, #ffffff);
   /* Центрирование через flex в game-area */
 }
-

@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import "./Game.css";
 import GameMenu from "./GameMenu";
 
+// Версия приложения (из package.json через Vite define)
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.0.1";
+
 // Класс частицы
 class Particle {
   constructor(canvas, x, y, color) {
@@ -29,13 +32,13 @@ class Particle {
     this.decay = 0.02 + Math.random() * 0.03; // Скорость исчезновения
 
     // Гравитация
-    this.gravity = 0.1;
+    this.gravity = 0.15; // Увеличена для более быстрой анимации
   }
 
   update(deltaTime) {
     // Нормализуем deltaTime для 60 FPS (16.67ms на кадр)
     const normalizedDelta = deltaTime / 16.67;
-    
+
     // Применяем гравитацию (независимо от FPS)
     this.vy += this.gravity * normalizedDelta;
 
@@ -77,9 +80,12 @@ class ParticleManager {
   // Создание частиц из квадрата
   createExplosion(x, y, color, count = 15) {
     // Оптимизация для мобильных: уменьшаем количество частиц
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const isMobile =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent
+      );
     const particleCount = isMobile ? Math.min(count, 8) : count;
-    
+
     for (let i = 0; i < particleCount; i++) {
       this.particles.push(new Particle(this.canvas, x, y, color));
     }
@@ -123,9 +129,9 @@ class Square {
     this.x = x;
     this.y = y;
 
-    // Скорость (произвольная)
-    this.vx = (Math.random() - 0.5) * 2; // от -1 до 1
-    this.vy = (Math.random() - 0.5) * 2; // от -1 до 1
+    // Скорость (произвольная, увеличена для более быстрой анимации)
+    this.vx = (Math.random() - 0.5) * 3; // от -1.5 до 1.5
+    this.vy = (Math.random() - 0.5) * 3; // от -1.5 до 1.5
 
     // Цвет (случайный)
     this.color = `hsl(${Math.random() * 360}, 70%, 50%)`;
@@ -135,7 +141,7 @@ class Square {
   update(squares, deltaTime) {
     // Нормализуем deltaTime для 60 FPS (16.67ms на кадр)
     const normalizedDelta = deltaTime / 16.67;
-    
+
     // Обновляем позицию (скорость независима от FPS)
     this.x += this.vx * normalizedDelta;
     this.y += this.vy * normalizedDelta;
@@ -158,10 +164,14 @@ class Square {
       const other = squares[i];
       if (other !== this) {
         // Быстрая проверка расстояния перед детальной проверкой
-        const dx = Math.abs((this.x + this.size / 2) - (other.x + other.size / 2));
-        const dy = Math.abs((this.y + this.size / 2) - (other.y + other.size / 2));
+        const dx = Math.abs(
+          this.x + this.size / 2 - (other.x + other.size / 2)
+        );
+        const dy = Math.abs(
+          this.y + this.size / 2 - (other.y + other.size / 2)
+        );
         const minDist = (this.size + other.size) / 2;
-        
+
         if (dx < minDist * 1.5 && dy < minDist * 1.5) {
           this.checkCollision(other);
         }
@@ -467,7 +477,7 @@ class Obstacle {
   update(deltaTime) {
     // Нормализуем deltaTime для 60 FPS (16.67ms на кадр)
     const normalizedDelta = deltaTime / 16.67;
-    
+
     // Двигаем линию вниз (скорость независима от FPS)
     this.y += this.verticalSpeed * normalizedDelta;
 
@@ -589,15 +599,15 @@ class ObstacleGenerator {
     });
 
     // Удаляем препятствия, вышедшие за экран
-    const removedObstacles = this.obstacles.filter(
-      (obstacle) => obstacle.isOffScreen()
+    const removedObstacles = this.obstacles.filter((obstacle) =>
+      obstacle.isOffScreen()
     );
-    
+
     // Удаляем ID удаленных препятствий из passedObstacles
     removedObstacles.forEach((obstacle) => {
       this.passedObstacles.delete(obstacle.getId());
     });
-    
+
     this.obstacles = this.obstacles.filter(
       (obstacle) => !obstacle.isOffScreen()
     );
@@ -628,7 +638,7 @@ class ObstacleGenerator {
 
     for (const obstacle of this.obstacles) {
       const obstacleId = obstacle.getId();
-      
+
       // Если препятствие прошло ниже персонажа и еще не было засчитано
       if (obstacle.y > playerBottom && !this.passedObstacles.has(obstacleId)) {
         this.passedObstacles.add(obstacleId);
@@ -712,10 +722,10 @@ class Player {
     this.initialY = canvas.height - canvas.height * 0.1 - this.height;
     this.y = this.initialY;
 
-    // Физика
+    // Физика (увеличена для более быстрой и плавной анимации)
     this.velocityY = 0; // Вертикальная скорость
-    this.gravity = 0.05; // Гравитация
-    this.jumpForce = -2; // Сила прыжка (отрицательное значение = вверх)
+    this.gravity = 0.08; // Гравитация (увеличена)
+    this.jumpForce = -1.8; // Сила прыжка (отрицательное значение = вверх, увеличена)
     // Земля: нижний край canvas
     this.groundY = canvas.height - this.height;
     this.wasInAir = false; // Флаг: был ли персонаж в воздухе
@@ -894,28 +904,28 @@ function Game() {
     // Фиксированное внутреннее разрешение игры (логические единицы)
     const GAME_WIDTH = 375; // Ширина игры в логических пикселях
     const GAME_HEIGHT = 667; // Высота игры в логических пикселях (соотношение iPhone)
-    
+
     // Установка размеров canvas с нормализацией
     const resizeCanvas = () => {
       const container = canvas.parentElement;
       const containerWidth = container.clientWidth;
       const containerHeight = container.clientHeight;
-      
+
       // Вычисляем масштаб для сохранения пропорций
       const scaleX = containerWidth / GAME_WIDTH;
       const scaleY = containerHeight / GAME_HEIGHT;
       const scale = Math.min(scaleX, scaleY); // Берем меньший масштаб для сохранения пропорций
-      
+
       // Устанавливаем размеры canvas (внутреннее разрешение игры)
       canvas.width = GAME_WIDTH;
       canvas.height = GAME_HEIGHT;
-      
+
       // Масштабируем отображение CSS для нормализации
       const scaledWidth = GAME_WIDTH * scale;
       const scaledHeight = GAME_HEIGHT * scale;
       canvas.style.width = `${scaledWidth}px`;
       canvas.style.height = `${scaledHeight}px`;
-      canvas.style.imageRendering = 'pixelated'; // Четкое отображение пикселей
+      canvas.style.imageRendering = "pixelated"; // Четкое отображение пикселей
 
       // Обновляем позицию персонажа при изменении размера
       if (playerRef.current) {
@@ -954,9 +964,9 @@ function Game() {
     // Инициализируем генератор препятствий
     if (!obstacleGeneratorRef.current) {
       obstacleGeneratorRef.current = new ObstacleGenerator(canvas, {
-        spawnInterval: 5000, // Генерируем новую линию каждые 2 секунды
-        verticalSpeed: 0.2, // Скорость движения сверху вниз
-        holeSpeed: 0.6, // Скорость движения дырок
+        spawnInterval: 6000, // Генерируем новую линию каждые 3 секунды
+        verticalSpeed: 0.5, // Скорость движения сверху вниз (увеличена)
+        holeSpeed: 1.2, // Скорость движения дырок (увеличена)
         holeSizeMin: 40, // Минимальный размер дырки
         holeSizeMax: 80, // Максимальный размер дырки
         lineWidth: 3, // Ширина линии
@@ -970,21 +980,22 @@ function Game() {
     let lastHealthUpdate = 0;
     const HEALTH_UPDATE_INTERVAL = 100; // Обновляем здоровье не чаще раз в 100мс
     let cachedHealth = 0;
-    
+
     // Для расчета deltaTime
     let lastFrameTime = performance.now();
-    
+
     // Оптимизация canvas для мобильных устройств
-    ctx.imageSmoothingEnabled = false; // Отключаем сглаживание для лучшей производительности
-    
+    ctx.imageSmoothingEnabled = true; // Включаем сглаживание для более плавной анимации
+    ctx.imageSmoothingQuality = "high"; // Высокое качество сглаживания
+
     // Функция отрисовки
     const render = () => {
       const currentTime = performance.now();
-      
+
       // Вычисляем deltaTime (время между кадрами в миллисекундах)
       let deltaTime = currentTime - lastFrameTime;
       lastFrameTime = currentTime;
-      
+
       // Ограничиваем deltaTime для предотвращения больших скачков
       // (например, когда вкладка была неактивна)
       if (deltaTime > 100) {
@@ -1006,7 +1017,7 @@ function Game() {
         // Обновляем время игры только когда игра запущена
         gameTimeRef.current = currentTime;
         obstacleGeneratorRef.current.update(currentTime, deltaTime);
-        
+
         // Подсчитываем пройденные препятствия и увеличиваем счет
         if (playerRef.current) {
           const passedCount = obstacleGeneratorRef.current.countPassedObstacles(
@@ -1162,7 +1173,10 @@ function Game() {
   return (
     <div className="game-container">
       <div className="game-header">
-        <h2 className="game-title">LennyLine</h2>
+        <div className="game-title-section">
+          <h2 className="game-title">LennyLine</h2>
+          <span className="game-version">v{APP_VERSION}</span>
+        </div>
         <div className="game-stats">
           <div className="health">Здоровье: {health}</div>
           <div className="score">Счет: {score}</div>

@@ -7,7 +7,7 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  background: rgba(0, 0, 0, 0.3); /* Прозрачный фон */
+  background: rgba(255, 255, 255, 0.95); /* Белый полупрозрачный фон */
   z-index: 10;
 }
 
@@ -16,14 +16,14 @@
   font-size: 1.5rem;
   font-weight: 600;
   color: #ffffff;
-  background: var(--tg-theme-button-color, #3390ec);
+  background: #3390ec;
   border: none;
   border-radius: 12px;
   cursor: pointer;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
   transition: transform 0.1s ease, opacity 0.2s ease;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .game-menu-button:active {

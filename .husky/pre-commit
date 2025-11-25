@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🔄 Bumping version before commit..."
+
+# Запоминаем текущую версию
+OLD_VERSION=$(node -e "console.log(require('./package.json').version)")
+
+# Повышаем версию
+node scripts/bump-version.js
+
+# Получаем новую версию
+NEW_VERSION=$(node -e "console.log(require('./package.json').version)")
+
+if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+  echo "✅ Version bumped from $OLD_VERSION to $NEW_VERSION"
+  
+  # Добавляем package.json в staging для включения в текущий коммит
+  git add package.json
+  echo "📦 package.json (v$NEW_VERSION) will be included in this commit"
+else
+  echo "ℹ️  Version unchanged ($OLD_VERSION)"
+fi

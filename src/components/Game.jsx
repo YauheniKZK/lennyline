@@ -374,6 +374,14 @@ class SquareGenerator {
     for (let i = 0; i < this.squares.length; i++) {
       this.squares[i].update(this.squares, deltaTime);
     }
+
+    // Догенерируем квадраты, если их осталось меньше 3
+    if (this.squares.length < 3) {
+      const needed = this.maxSquares - this.squares.length;
+      for (let i = 0; i < needed; i++) {
+        this.generate();
+      }
+    }
   }
 
   // Отрисовка всех квадратов
@@ -723,9 +731,9 @@ class Player {
     this.y = this.initialY;
 
     // Физика (увеличена для более быстрой и плавной анимации)
-    this.velocityY = 0; // Вертикальная скорость
-    this.gravity = 0.08; // Гравитация (увеличена)
-    this.jumpForce = -1.8; // Сила прыжка (отрицательное значение = вверх, увеличена)
+    this.velocityY = 0.5; // Вертикальная скорость
+    this.gravity = 0.2; // Гравитация (увеличена)
+    this.jumpForce = -3; // Сила прыжка (отрицательное значение = вверх, увеличена)
     // Земля: нижний край canvas
     this.groundY = canvas.height - this.height;
     this.wasInAir = false; // Флаг: был ли персонаж в воздухе
@@ -1005,8 +1013,9 @@ function Game() {
         deltaTime = 1; // Минимум 1мс
       }
 
-      // Очистка canvas
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Очистка canvas и заливка белым фоном
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // Обновление препятствий (только если игра запущена)
       if (

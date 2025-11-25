@@ -72,24 +72,34 @@ class ParticleManager {
 
   // Создание частиц из квадрата
   createExplosion(x, y, color, count = 15) {
-    for (let i = 0; i < count; i++) {
+    // Оптимизация для мобильных: уменьшаем количество частиц
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const particleCount = isMobile ? Math.min(count, 8) : count;
+    
+    for (let i = 0; i < particleCount; i++) {
       this.particles.push(new Particle(this.canvas, x, y, color));
     }
   }
 
   // Обновление всех частиц
   update() {
-    this.particles = this.particles.filter((particle) => {
-      const alive = particle.update();
-      return alive;
-    });
+    // Оптимизация: используем цикл for вместо filter для лучшей производительности
+    let writeIndex = 0;
+    for (let i = 0; i < this.particles.length; i++) {
+      const particle = this.particles[i];
+      if (particle.update()) {
+        this.particles[writeIndex++] = particle;
+      }
+    }
+    this.particles.length = writeIndex;
   }
 
   // Отрисовка всех частиц
   draw() {
-    this.particles.forEach((particle) => {
-      particle.draw();
-    });
+    // Оптимизация: используем цикл for вместо forEach
+    for (let i = 0; i < this.particles.length; i++) {
+      this.particles[i].draw();
+    }
   }
 
   // Очистка всех частиц
@@ -134,12 +144,22 @@ class Square {
       this.y = Math.max(0, Math.min(this.y, this.canvas.height - this.size));
     }
 
-    // Отскок от других квадратов
-    squares.forEach((other) => {
+    // Оптимизация: проверяем столкновения только с близкими квадратами
+    // Для каждого квадрата проверяем только те, которые еще не проверяли друг с другом
+    const thisIndex = squares.indexOf(this);
+    for (let i = thisIndex + 1; i < squares.length; i++) {
+      const other = squares[i];
       if (other !== this) {
-        this.checkCollision(other);
+        // Быстрая проверка расстояния перед детальной проверкой
+        const dx = Math.abs((this.x + this.size / 2) - (other.x + other.size / 2));
+        const dy = Math.abs((this.y + this.size / 2) - (other.y + other.size / 2));
+        const minDist = (this.size + other.size) / 2;
+        
+        if (dx < minDist * 1.5 && dy < minDist * 1.5) {
+          this.checkCollision(other);
+        }
       }
-    });
+    }
   }
 
   // Получить ID квадрата (для отслеживания)
@@ -333,16 +353,18 @@ class SquareGenerator {
 
   // Обновление всех квадратов
   update() {
-    this.squares.forEach((square) => {
-      square.update(this.squares);
-    });
+    // Оптимизация: обновляем квадраты в одном цикле
+    for (let i = 0; i < this.squares.length; i++) {
+      this.squares[i].update(this.squares);
+    }
   }
 
   // Отрисовка всех квадратов
   draw() {
-    this.squares.forEach((square) => {
-      square.draw();
-    });
+    // Оптимизация: используем цикл for вместо forEach
+    for (let i = 0; i < this.squares.length; i++) {
+      this.squares[i].draw();
+    }
   }
 
   // Очистка всех квадратов
@@ -621,9 +643,10 @@ class ObstacleGenerator {
 
   // Отрисовка всех препятствий
   draw() {
-    this.obstacles.forEach((obstacle) => {
-      obstacle.draw();
-    });
+    // Оптимизация: используем цикл for вместо forEach
+    for (let i = 0; i < this.obstacles.length; i++) {
+      this.obstacles[i].draw();
+    }
   }
 
   // Очистка всех препятствий
@@ -880,6 +903,14 @@ function Game() {
     // Обработка изменения размера окна
     window.addEventListener("resize", resizeCanvas);
 
+    // Оптимизация для мобильных устройств
+    let lastHealthUpdate = 0;
+    const HEALTH_UPDATE_INTERVAL = 100; // Обновляем здоровье не чаще раз в 100мс
+    let cachedHealth = 0;
+    
+    // Оптимизация canvas для мобильных устройств
+    ctx.imageSmoothingEnabled = false; // Отключаем сглаживание для лучшей производительности
+    
     // Функция отрисовки
     const render = () => {
       const currentTime = performance.now();
@@ -911,16 +942,11 @@ function Game() {
           setIsGameStarted(false);
         }
 
-        // Обновляем отображение здоровья
-        setHealth(playerRef.current.health);
-
         // Проверка столкновений с препятствиями
         if (obstacleGeneratorRef.current) {
           const isDead = obstacleGeneratorRef.current.checkPlayerCollision(
             playerRef.current
           );
-          // Обновляем здоровье после столкновений
-          setHealth(playerRef.current.health);
           // Игра заканчивается если здоровье < 0
           if (isDead) {
             setIsGameOver(true);
@@ -946,8 +972,21 @@ function Game() {
           playerRef.current,
           particleManagerRef.current
         );
-        // Обновляем здоровье после сбивания квадратов
-        setHealth(playerRef.current.health);
+      }
+
+      // Оптимизированное обновление здоровья (не чаще чем раз в HEALTH_UPDATE_INTERVAL мс)
+      if (
+        playerRef.current &&
+        isGameStartedRef.current &&
+        !isGameOverRef.current &&
+        currentTime - lastHealthUpdate >= HEALTH_UPDATE_INTERVAL
+      ) {
+        const newHealth = playerRef.current.health;
+        if (newHealth !== cachedHealth) {
+          cachedHealth = newHealth;
+          setHealth(newHealth);
+          lastHealthUpdate = currentTime;
+        }
       }
 
       // Обновление частиц

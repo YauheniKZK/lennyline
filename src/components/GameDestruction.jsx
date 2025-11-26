@@ -12,7 +12,7 @@ function GameDestruction() {
   // Ключ: cubeId, Значение: количество кликов (0 = нетронутый, maxHits = разрушен)
   const [cubeDamage, setCubeDamage] = useState(new Map());
   const [cubeSize] = useState(5); // Размер куба (5x5x5)
-  const [hitsToDestroy] = useState(10); // Количество кликов для разрушения кубика
+  const [hitsToDestroy] = useState(50); // Количество кликов для разрушения кубика
 
   const handleStart = () => {
     setIsViewerStarted(true);

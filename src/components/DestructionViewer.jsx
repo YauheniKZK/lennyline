@@ -4,6 +4,20 @@ import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import "./ModelViewer.css";
 
+// Функция для вибрации в Telegram Mini App
+function triggerHapticFeedback() {
+  try {
+    // Проверяем наличие Telegram WebApp API
+    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
+      // Используем легкую вибрацию для минимального отклика
+      window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
+    }
+  } catch (error) {
+    // Игнорируем ошибки, если API недоступен
+    console.log('HapticFeedback недоступен:', error);
+  }
+}
+
 // Компонент для одного маленького кубика
 function SmallCube({
   position,
@@ -13,16 +27,49 @@ function SmallCube({
   cubeId,
 }) {
   const cubeRef = useRef();
+  const meshRef = useRef();
   const [hovered, setHovered] = useState(false);
   const pointerDownRef = useRef(null);
   const hasMovedRef = useRef(false);
+  const shakeIntensityRef = useRef(0); // Интенсивность тряски
+  const originalPositionRef = useRef(new THREE.Vector3(...position));
 
   useEffect(() => {
     if (cubeRef.current) {
       cubeRef.current.userData.isClickable = true;
       cubeRef.current.userData.cubeId = cubeId;
     }
-  }, [cubeId]);
+    // Сохраняем исходную позицию
+    originalPositionRef.current = new THREE.Vector3(...position);
+  }, [cubeId, position]);
+
+  // Анимация тряски
+  useFrame(() => {
+    if (meshRef.current && shakeIntensityRef.current > 0) {
+      // Генерируем случайное смещение для тряски
+      const shakeAmount = shakeIntensityRef.current * 0.1;
+      const offsetX = (Math.random() - 0.5) * shakeAmount;
+      const offsetY = (Math.random() - 0.5) * shakeAmount;
+      const offsetZ = (Math.random() - 0.5) * shakeAmount;
+      
+      // Применяем смещение к исходной позиции
+      meshRef.current.position.set(
+        originalPositionRef.current.x + offsetX,
+        originalPositionRef.current.y + offsetY,
+        originalPositionRef.current.z + offsetZ
+      );
+      
+      // Уменьшаем интенсивность тряски со временем
+      shakeIntensityRef.current *= 0.9;
+      
+      // Если интенсивность стала очень маленькой, останавливаем тряску
+      if (shakeIntensityRef.current < 0.01) {
+        shakeIntensityRef.current = 0;
+        // Возвращаем кубик в исходную позицию
+        meshRef.current.position.copy(originalPositionRef.current);
+      }
+    }
+  });
 
   // Если кубик полностью разрушен, не рендерим его
   if (damageLevel >= hitsToDestroy) {
@@ -98,6 +145,10 @@ function SmallCube({
     }
 
     if (onCubeClick) {
+      // Активируем эффект тряски
+      shakeIntensityRef.current = 1.0;
+      // Вызываем вибрацию в Telegram Mini App
+      triggerHapticFeedback();
       onCubeClick(cubeId);
     }
 
@@ -112,8 +163,13 @@ function SmallCube({
 
   return (
     <mesh
-      ref={cubeRef}
-      position={position}
+      ref={(ref) => {
+        cubeRef.current = ref;
+        meshRef.current = ref;
+        if (ref) {
+          ref.position.set(...position);
+        }
+      }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

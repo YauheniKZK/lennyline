@@ -8,59 +8,144 @@ import "./ModelViewer.css";
 function ClickHandler({ onPartClick }) {
   const { camera, gl, raycaster, scene } = useThree();
   const [hovered, setHovered] = useState(null);
+  const pointerDownRef = useRef(null);
+  const hasMovedRef = useRef(false);
+  const pointerDownTimeRef = useRef(null);
 
   useEffect(() => {
-    const handleClick = (event) => {
-      // Нормализуем координаты
-      const mouse = new THREE.Vector2();
-      const rect = gl.domElement.getBoundingClientRect();
+    const handlePointerDown = (event) => {
+      const clientX = event.clientX || (event.touches?.[0]?.clientX);
+      const clientY = event.clientY || (event.touches?.[0]?.clientY);
       
-      const clientX = event.clientX || (event.changedTouches?.[0]?.clientX);
-      const clientY = event.clientY || (event.changedTouches?.[0]?.clientY);
-      
-      if (!clientX || !clientY) return;
-      
-      mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
-
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(scene.children, true);
-
-      // Находим первый кликабельный объект
-      for (const intersect of intersects) {
-        const object = intersect.object;
-        if (object.isMesh && object.userData.isClickable) {
-          const partName = object.userData.partName || object.name || "Unknown Part";
-          console.log("Клик обнаружен на:", partName);
-          if (onPartClick) {
-            onPartClick(partName, intersect);
-          }
-          break;
-        }
+      if (clientX !== undefined && clientY !== undefined) {
+        pointerDownRef.current = { x: clientX, y: clientY };
+        hasMovedRef.current = false;
+        pointerDownTimeRef.current = Date.now();
       }
     };
 
     const handlePointerMove = (event) => {
-      const mouse = new THREE.Vector2();
-      const rect = gl.domElement.getBoundingClientRect();
-      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      // Проверяем, было ли движение мыши с момента нажатия
+      if (pointerDownRef.current) {
+        const clientX = event.clientX || (event.touches?.[0]?.clientX);
+        const clientY = event.clientY || (event.touches?.[0]?.clientY);
+        
+        if (clientX !== undefined && clientY !== undefined) {
+          const dx = Math.abs(clientX - pointerDownRef.current.x);
+          const dy = Math.abs(clientY - pointerDownRef.current.y);
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          // Если движение больше 8 пикселей, считаем это drag
+          if (distance > 8) {
+            hasMovedRef.current = true;
+          }
+        }
+      }
 
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(scene.children, true);
+      // Обновляем hover состояние только если не идет drag
+      if (!pointerDownRef.current) {
+        const mouse = new THREE.Vector2();
+        const rect = gl.domElement.getBoundingClientRect();
+        const clientX = event.clientX || (event.touches?.[0]?.clientX);
+        const clientY = event.clientY || (event.touches?.[0]?.clientY);
+        
+        if (clientX !== undefined && clientY !== undefined) {
+          mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
-      const hoveredObject = intersects.find(i => i.object.isMesh && i.object.userData.isClickable)?.object || null;
-      setHovered(hoveredObject);
+          raycaster.setFromCamera(mouse, camera);
+          const intersects = raycaster.intersectObjects(scene.children, true);
+
+          const hoveredObject = intersects.find(i => i.object.isMesh && i.object.userData.isClickable)?.object || null;
+          setHovered(hoveredObject);
+        }
+      }
     };
 
-    gl.domElement.addEventListener("click", handleClick);
-    gl.domElement.addEventListener("pointermove", handlePointerMove);
-    gl.domElement.addEventListener("touchend", handleClick);
+    const handlePointerUp = (event) => {
+      // Проверяем, был ли это клик (не drag)
+      if (pointerDownRef.current && !hasMovedRef.current) {
+        // Проверяем время - если между нажатием и отпусканием прошло слишком много времени, это не клик
+        const timeDiff = pointerDownTimeRef.current ? Date.now() - pointerDownTimeRef.current : 0;
+        if (timeDiff > 300) {
+          pointerDownRef.current = null;
+          hasMovedRef.current = false;
+          pointerDownTimeRef.current = null;
+          return;
+        }
+
+        // Проверяем финальную позицию - если она сильно отличается от начальной, это был drag
+        const clientX = event.clientX || (event.changedTouches?.[0]?.clientX);
+        const clientY = event.clientY || (event.changedTouches?.[0]?.clientY);
+        
+        if (clientX !== undefined && clientY !== undefined && pointerDownRef.current) {
+          const dx = Math.abs(clientX - pointerDownRef.current.x);
+          const dy = Math.abs(clientY - pointerDownRef.current.y);
+          const finalDistance = Math.sqrt(dx * dx + dy * dy);
+          
+          // Если финальное расстояние больше 5 пикселей, это был drag
+          if (finalDistance > 5) {
+            pointerDownRef.current = null;
+            hasMovedRef.current = false;
+            pointerDownTimeRef.current = null;
+            return;
+          }
+        }
+
+        // Нормализуем координаты
+        const mouse = new THREE.Vector2();
+        const rect = gl.domElement.getBoundingClientRect();
+        
+        if (clientX !== undefined && clientY !== undefined) {
+          mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+          raycaster.setFromCamera(mouse, camera);
+          const intersects = raycaster.intersectObjects(scene.children, true);
+
+          // Находим первый кликабельный объект
+          for (const intersect of intersects) {
+            const object = intersect.object;
+            if (object.isMesh && object.userData.isClickable) {
+              const partName = object.userData.partName || object.name || "Unknown Part";
+              console.log("Клик обнаружен на:", partName);
+              if (onPartClick) {
+                onPartClick(partName, intersect);
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      // Сбрасываем состояние при отпускании кнопки
+      pointerDownRef.current = null;
+      hasMovedRef.current = false;
+      pointerDownTimeRef.current = null;
+    };
+
+    const handleClick = (event) => {
+      // Игнорируем событие click, используем только pointerup
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    gl.domElement.addEventListener("pointerdown", handlePointerDown, { passive: true });
+    gl.domElement.addEventListener("pointermove", handlePointerMove, { passive: true });
+    gl.domElement.addEventListener("pointerup", handlePointerUp, { passive: true });
+    gl.domElement.addEventListener("click", handleClick, { passive: false });
+    gl.domElement.addEventListener("touchstart", handlePointerDown, { passive: true });
+    gl.domElement.addEventListener("touchmove", handlePointerMove, { passive: true });
+    gl.domElement.addEventListener("touchend", handlePointerUp, { passive: true });
 
     return () => {
-      gl.domElement.removeEventListener("click", handleClick);
+      gl.domElement.removeEventListener("pointerdown", handlePointerDown);
       gl.domElement.removeEventListener("pointermove", handlePointerMove);
-      gl.domElement.removeEventListener("touchend", handleClick);
+      gl.domElement.removeEventListener("pointerup", handlePointerUp);
+      gl.domElement.removeEventListener("click", handleClick);
+      gl.domElement.removeEventListener("touchstart", handlePointerDown);
+      gl.domElement.removeEventListener("touchmove", handlePointerMove);
+      gl.domElement.removeEventListener("touchend", handlePointerUp);
     };
   }, [camera, gl, raycaster, scene, onPartClick]);
 
@@ -143,6 +228,8 @@ function CubeSegment({
   const [texture, setTexture] = useState(null);
   const segmentRef = useRef();
   const materialRef = useRef();
+  const pointerDownRef = useRef(null);
+  const hasMovedRef = useRef(false);
   
   // Название сегмента: например, "Передняя - Сегмент (1,1)"
   const segmentName = `${sideName} - Сегмент (${row + 1},${col + 1})`;
@@ -209,8 +296,67 @@ function CubeSegment({
     }
   }, [selectedPart, hovered, segmentName, texture]);
 
-  const handleClick = (e) => {
+  const handlePointerDown = (e) => {
     e.stopPropagation();
+    const clientX = e.clientX || (e.touches?.[0]?.clientX);
+    const clientY = e.clientY || (e.touches?.[0]?.clientY);
+    
+    if (clientX !== undefined && clientY !== undefined) {
+      pointerDownRef.current = { x: clientX, y: clientY };
+      hasMovedRef.current = false;
+    }
+  };
+
+  const handlePointerMove = (e) => {
+    // Проверяем, было ли движение мыши с момента нажатия
+    if (pointerDownRef.current) {
+      const clientX = e.clientX || (e.touches?.[0]?.clientX);
+      const clientY = e.clientY || (e.touches?.[0]?.clientY);
+      
+      if (clientX !== undefined && clientY !== undefined) {
+        const dx = Math.abs(clientX - pointerDownRef.current.x);
+        const dy = Math.abs(clientY - pointerDownRef.current.y);
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // Если движение больше 8 пикселей, считаем это drag
+        if (distance > 8) {
+          hasMovedRef.current = true;
+        }
+      }
+    }
+  };
+
+  const handlePointerUp = (e) => {
+    e.stopPropagation();
+    
+    // Если было движение, это не клик, а завершение drag
+    if (!pointerDownRef.current) {
+      return;
+    }
+
+    // Проверяем финальную позицию - если она сильно отличается от начальной, это был drag
+    const clientX = e.clientX || (e.changedTouches?.[0]?.clientX);
+    const clientY = e.clientY || (e.changedTouches?.[0]?.clientY);
+    
+    if (clientX !== undefined && clientY !== undefined && pointerDownRef.current) {
+      const dx = Math.abs(clientX - pointerDownRef.current.x);
+      const dy = Math.abs(clientY - pointerDownRef.current.y);
+      const finalDistance = Math.sqrt(dx * dx + dy * dy);
+      
+      // Если финальное расстояние больше 5 пикселей, это был drag
+      if (finalDistance > 5 || hasMovedRef.current) {
+        pointerDownRef.current = null;
+        hasMovedRef.current = false;
+        return;
+      }
+    }
+
+    if (hasMovedRef.current) {
+      pointerDownRef.current = null;
+      hasMovedRef.current = false;
+      return;
+    }
+
     console.log(`Клик по сегменту: ${segmentName}`);
     if (onPartClick) {
       const intersect = {
@@ -220,6 +366,15 @@ function CubeSegment({
       };
       onPartClick(segmentName, intersect);
     }
+
+    pointerDownRef.current = null;
+    hasMovedRef.current = false;
+  };
+
+  const handleClick = (e) => {
+    // Игнорируем событие click, используем только pointerup
+    e.stopPropagation();
+    e.preventDefault();
   };
 
   return (
@@ -227,7 +382,11 @@ function CubeSegment({
       ref={segmentRef}
       position={position}
       rotation={rotation}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
       onClick={handleClick}
+      onPointerCancel={handlePointerUp}
       onPointerOver={(e) => {
         e.stopPropagation();
         setHovered(true);

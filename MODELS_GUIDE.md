@@ -100,3 +100,6 @@
   - **glTF-Pipeline** для оптимизации
   - **Draco compression** для сжатия геометрии
 
+
+
+

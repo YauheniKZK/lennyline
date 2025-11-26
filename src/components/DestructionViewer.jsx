@@ -8,7 +8,8 @@ import "./ModelViewer.css";
 function SmallCube({
   position,
   onCubeClick,
-  isRemoved,
+  damageLevel = 0, // Степень разрушения (0 = нетронутый, hitsToDestroy = разрушен)
+  hitsToDestroy = 3,
   cubeId,
 }) {
   const cubeRef = useRef();
@@ -23,10 +24,18 @@ function SmallCube({
     }
   }, [cubeId]);
 
-  // Если кубик удален, не рендерим его
-  if (isRemoved) {
+  // Если кубик полностью разрушен, не рендерим его
+  if (damageLevel >= hitsToDestroy) {
     return null;
   }
+
+  // Вычисляем прозрачность в зависимости от степени разрушения
+  // Прозрачность увеличивается от 1.0 (полностью непрозрачный) до 0.0 (полностью прозрачный)
+  const progress = damageLevel / hitsToDestroy; // 0.0 - 1.0
+  const opacity = Math.max(0.0, 1.0 - progress); // От 1.0 до 0.0
+
+  // Цвет кубика остается синим, меняется только прозрачность
+  const cubeColor = hovered ? 0x66ccff : 0x3390ec;
 
   const handlePointerDown = (e) => {
     e.stopPropagation();
@@ -101,9 +110,6 @@ function SmallCube({
     e.preventDefault();
   };
 
-  // Цвет кубика
-  const cubeColor = hovered ? 0x66ccff : 0x3390ec;
-
   return (
     <mesh
       ref={cubeRef}
@@ -123,7 +129,11 @@ function SmallCube({
       }}
     >
       <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color={cubeColor} />
+      <meshStandardMaterial 
+        color={cubeColor} 
+        transparent={true}
+        opacity={opacity}
+      />
     </mesh>
   );
 }
@@ -146,8 +156,9 @@ function BackgroundColor() {
 // Компонент для отображения сцены с кубом из кубиков
 function DestructionScene({
   onCubeClick,
-  removedCubes,
+  cubeDamage, // Map с количеством кликов для каждого кубика
   cubeSize = 5, // Размер большого куба (5x5x5 = 125 маленьких кубиков)
+  hitsToDestroy = 3, // Количество кликов для разрушения
 }) {
   const cubeSpacing = 1.05; // Небольшой отступ между кубиками
   const offset = ((cubeSize - 1) * cubeSpacing) / 2;
@@ -184,15 +195,19 @@ function DestructionScene({
 
       {/* Куб из маленьких кубиков */}
       <group>
-        {cubes.map((cube) => (
-          <SmallCube
-            key={cube.id}
-            position={cube.position}
-            onCubeClick={onCubeClick}
-            isRemoved={removedCubes.has(cube.id)}
-            cubeId={cube.id}
-          />
-        ))}
+        {cubes.map((cube) => {
+          const damageLevel = cubeDamage.get(cube.id) || 0;
+          return (
+            <SmallCube
+              key={cube.id}
+              position={cube.position}
+              onCubeClick={onCubeClick}
+              damageLevel={damageLevel}
+              hitsToDestroy={hitsToDestroy}
+              cubeId={cube.id}
+            />
+          );
+        })}
       </group>
 
       {/* Управление камерой */}
@@ -207,7 +222,7 @@ function DestructionScene({
   );
 }
 
-function DestructionViewer({ onCubeClick, removedCubes, cubeSize = 5 }) {
+function DestructionViewer({ onCubeClick, cubeDamage, cubeSize = 5, hitsToDestroy = 3 }) {
   return (
     <div className="model-viewer-container">
       <Canvas
@@ -224,8 +239,9 @@ function DestructionViewer({ onCubeClick, removedCubes, cubeSize = 5 }) {
       >
         <DestructionScene
           onCubeClick={onCubeClick}
-          removedCubes={removedCubes}
+          cubeDamage={cubeDamage}
           cubeSize={cubeSize}
+          hitsToDestroy={hitsToDestroy}
         />
       </Canvas>
     </div>

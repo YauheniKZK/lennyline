@@ -1,4 +1,4 @@
-import { Suspense, useState, useRef, useEffect } from "react";
+import { Suspense, useState, useRef, useEffect, useMemo } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Environment, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -14,9 +14,9 @@ function ClickHandler({ onPartClick }) {
 
   useEffect(() => {
     const handlePointerDown = (event) => {
-      const clientX = event.clientX || (event.touches?.[0]?.clientX);
-      const clientY = event.clientY || (event.touches?.[0]?.clientY);
-      
+      const clientX = event.clientX || event.touches?.[0]?.clientX;
+      const clientY = event.clientY || event.touches?.[0]?.clientY;
+
       if (clientX !== undefined && clientY !== undefined) {
         pointerDownRef.current = { x: clientX, y: clientY };
         hasMovedRef.current = false;
@@ -27,14 +27,14 @@ function ClickHandler({ onPartClick }) {
     const handlePointerMove = (event) => {
       // Проверяем, было ли движение мыши с момента нажатия
       if (pointerDownRef.current) {
-        const clientX = event.clientX || (event.touches?.[0]?.clientX);
-        const clientY = event.clientY || (event.touches?.[0]?.clientY);
-        
+        const clientX = event.clientX || event.touches?.[0]?.clientX;
+        const clientY = event.clientY || event.touches?.[0]?.clientY;
+
         if (clientX !== undefined && clientY !== undefined) {
           const dx = Math.abs(clientX - pointerDownRef.current.x);
           const dy = Math.abs(clientY - pointerDownRef.current.y);
           const distance = Math.sqrt(dx * dx + dy * dy);
-          
+
           // Если движение больше 8 пикселей, считаем это drag
           if (distance > 8) {
             hasMovedRef.current = true;
@@ -46,9 +46,9 @@ function ClickHandler({ onPartClick }) {
       if (!pointerDownRef.current) {
         const mouse = new THREE.Vector2();
         const rect = gl.domElement.getBoundingClientRect();
-        const clientX = event.clientX || (event.touches?.[0]?.clientX);
-        const clientY = event.clientY || (event.touches?.[0]?.clientY);
-        
+        const clientX = event.clientX || event.touches?.[0]?.clientX;
+        const clientY = event.clientY || event.touches?.[0]?.clientY;
+
         if (clientX !== undefined && clientY !== undefined) {
           mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
           mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
@@ -56,7 +56,10 @@ function ClickHandler({ onPartClick }) {
           raycaster.setFromCamera(mouse, camera);
           const intersects = raycaster.intersectObjects(scene.children, true);
 
-          const hoveredObject = intersects.find(i => i.object.isMesh && i.object.userData.isClickable)?.object || null;
+          const hoveredObject =
+            intersects.find(
+              (i) => i.object.isMesh && i.object.userData.isClickable
+            )?.object || null;
           setHovered(hoveredObject);
         }
       }
@@ -66,7 +69,9 @@ function ClickHandler({ onPartClick }) {
       // Проверяем, был ли это клик (не drag)
       if (pointerDownRef.current && !hasMovedRef.current) {
         // Проверяем время - если между нажатием и отпусканием прошло слишком много времени, это не клик
-        const timeDiff = pointerDownTimeRef.current ? Date.now() - pointerDownTimeRef.current : 0;
+        const timeDiff = pointerDownTimeRef.current
+          ? Date.now() - pointerDownTimeRef.current
+          : 0;
         if (timeDiff > 300) {
           pointerDownRef.current = null;
           hasMovedRef.current = false;
@@ -75,14 +80,18 @@ function ClickHandler({ onPartClick }) {
         }
 
         // Проверяем финальную позицию - если она сильно отличается от начальной, это был drag
-        const clientX = event.clientX || (event.changedTouches?.[0]?.clientX);
-        const clientY = event.clientY || (event.changedTouches?.[0]?.clientY);
-        
-        if (clientX !== undefined && clientY !== undefined && pointerDownRef.current) {
+        const clientX = event.clientX || event.changedTouches?.[0]?.clientX;
+        const clientY = event.clientY || event.changedTouches?.[0]?.clientY;
+
+        if (
+          clientX !== undefined &&
+          clientY !== undefined &&
+          pointerDownRef.current
+        ) {
           const dx = Math.abs(clientX - pointerDownRef.current.x);
           const dy = Math.abs(clientY - pointerDownRef.current.y);
           const finalDistance = Math.sqrt(dx * dx + dy * dy);
-          
+
           // Если финальное расстояние больше 5 пикселей, это был drag
           if (finalDistance > 5) {
             pointerDownRef.current = null;
@@ -95,7 +104,7 @@ function ClickHandler({ onPartClick }) {
         // Нормализуем координаты
         const mouse = new THREE.Vector2();
         const rect = gl.domElement.getBoundingClientRect();
-        
+
         if (clientX !== undefined && clientY !== undefined) {
           mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
           mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
@@ -107,7 +116,8 @@ function ClickHandler({ onPartClick }) {
           for (const intersect of intersects) {
             const object = intersect.object;
             if (object.isMesh && object.userData.isClickable) {
-              const partName = object.userData.partName || object.name || "Unknown Part";
+              const partName =
+                object.userData.partName || object.name || "Unknown Part";
               console.log("Клик обнаружен на:", partName);
               if (onPartClick) {
                 onPartClick(partName, intersect);
@@ -130,13 +140,25 @@ function ClickHandler({ onPartClick }) {
       event.stopPropagation();
     };
 
-    gl.domElement.addEventListener("pointerdown", handlePointerDown, { passive: true });
-    gl.domElement.addEventListener("pointermove", handlePointerMove, { passive: true });
-    gl.domElement.addEventListener("pointerup", handlePointerUp, { passive: true });
+    gl.domElement.addEventListener("pointerdown", handlePointerDown, {
+      passive: true,
+    });
+    gl.domElement.addEventListener("pointermove", handlePointerMove, {
+      passive: true,
+    });
+    gl.domElement.addEventListener("pointerup", handlePointerUp, {
+      passive: true,
+    });
     gl.domElement.addEventListener("click", handleClick, { passive: false });
-    gl.domElement.addEventListener("touchstart", handlePointerDown, { passive: true });
-    gl.domElement.addEventListener("touchmove", handlePointerMove, { passive: true });
-    gl.domElement.addEventListener("touchend", handlePointerUp, { passive: true });
+    gl.domElement.addEventListener("touchstart", handlePointerDown, {
+      passive: true,
+    });
+    gl.domElement.addEventListener("touchmove", handlePointerMove, {
+      passive: true,
+    });
+    gl.domElement.addEventListener("touchend", handlePointerUp, {
+      passive: true,
+    });
 
     return () => {
       gl.domElement.removeEventListener("pointerdown", handlePointerDown);
@@ -157,7 +179,7 @@ function ClickHandler({ onPartClick }) {
 }
 
 // Компонент для загрузки и отображения 3D модели с поддержкой кликов
-function Model({ url, onPartClick, selectedPart }) {
+function Model({ url, selectedPart }) {
   const { scene } = useGLTF(url);
   const originalMaterials = useRef(new Map());
 
@@ -172,13 +194,16 @@ function Model({ url, onPartClick, selectedPart }) {
         if (child.material) {
           materialsMap.set(child.uuid, child.material.clone());
           child.userData.isClickable = true;
-          child.userData.partName = child.name || `Part_${child.uuid.slice(0, 8)}`;
+          child.userData.partName =
+            child.name || `Part_${child.uuid.slice(0, 8)}`;
         }
       }
     });
 
     originalMaterials.current = materialsMap;
-    console.log(`Модель загружена: ${meshCount} мешей, ${materialsMap.size} с материалами`);
+    console.log(
+      `Модель загружена: ${meshCount} мешей, ${materialsMap.size} с материалами`
+    );
   }, [scene]);
 
   // Применяем выделение к выбранной части
@@ -186,7 +211,7 @@ function Model({ url, onPartClick, selectedPart }) {
     scene.traverse((child) => {
       if (child.isMesh) {
         const originalMaterial = originalMaterials.current.get(child.uuid);
-        
+
         if (selectedPart === child.userData.partName && originalMaterial) {
           const highlightMaterial = new THREE.MeshStandardMaterial({
             color: 0x3390ec,
@@ -195,13 +220,18 @@ function Model({ url, onPartClick, selectedPart }) {
             metalness: 0.3,
             roughness: 0.2,
           });
-          
+
           if (Array.isArray(child.material)) {
-            child.material = child.material.map(() => highlightMaterial.clone());
+            child.material = child.material.map(() =>
+              highlightMaterial.clone()
+            );
           } else {
             child.material = highlightMaterial;
           }
-        } else if (originalMaterial && selectedPart !== child.userData.partName) {
+        } else if (
+          originalMaterial &&
+          selectedPart !== child.userData.partName
+        ) {
           child.material = originalMaterial.clone();
         }
       }
@@ -212,17 +242,18 @@ function Model({ url, onPartClick, selectedPart }) {
 }
 
 // Компонент для одного сегмента стороны куба
-function CubeSegment({ 
-  sideName, 
-  segmentIndex, 
-  row, 
-  col, 
-  position, 
+function CubeSegment({
+  sideName,
+  row,
+  col,
+  position,
   rotation,
   segmentSize,
-  onPartClick, 
+  onPartClick,
   selectedPart,
-  segmentTextures // Map с URL изображений для сегментов
+  selectedParts,
+  segmentTextures, // Map с URL изображений для сегментов
+  dependencies, // Map зависимостей
 }) {
   const [hovered, setHovered] = useState(false);
   const [texture, setTexture] = useState(null);
@@ -230,7 +261,7 @@ function CubeSegment({
   const materialRef = useRef();
   const pointerDownRef = useRef(null);
   const hasMovedRef = useRef(false);
-  
+
   // Название сегмента: например, "Передняя - Сегмент (1,1)"
   const segmentName = `${sideName} - Сегмент (${row + 1},${col + 1})`;
   const textureUrl = segmentTextures?.get(segmentName);
@@ -279,12 +310,23 @@ function CubeSegment({
     };
   }, [textureUrl, segmentName]);
 
+  // Вычисляем, является ли этот сегмент зависимым от выбранного
+  const isDependent = useMemo(() => {
+    if (!selectedPart || !dependencies) return false;
+    const deps = dependencies.get(selectedPart);
+    return deps ? deps.includes(segmentName) : false;
+  }, [selectedPart, dependencies, segmentName]);
+
   // Обновляем цвет материала напрямую, не создавая новый материал
   useEffect(() => {
     if (materialRef.current && !texture) {
       // Меняем цвет только если нет текстуры
-      if (selectedPart === segmentName) {
-        materialRef.current.color.setHex(0x0066cc);
+      const isSelected =
+        selectedParts?.has(segmentName) || selectedPart === segmentName;
+      if (isSelected) {
+        materialRef.current.color.setHex(0x0066cc); // Синий для выбранного
+      } else if (isDependent) {
+        materialRef.current.color.setHex(0x00cc66); // Зеленый для зависимого
       } else if (hovered) {
         materialRef.current.color.setHex(0x4499ff);
       } else {
@@ -294,13 +336,13 @@ function CubeSegment({
       // Если есть текстура, используем белый цвет чтобы текстура отображалась корректно
       materialRef.current.color.setHex(0xffffff);
     }
-  }, [selectedPart, hovered, segmentName, texture]);
+  }, [selectedPart, selectedParts, hovered, segmentName, texture, isDependent]);
 
   const handlePointerDown = (e) => {
     e.stopPropagation();
-    const clientX = e.clientX || (e.touches?.[0]?.clientX);
-    const clientY = e.clientY || (e.touches?.[0]?.clientY);
-    
+    const clientX = e.clientX || e.touches?.[0]?.clientX;
+    const clientY = e.clientY || e.touches?.[0]?.clientY;
+
     if (clientX !== undefined && clientY !== undefined) {
       pointerDownRef.current = { x: clientX, y: clientY };
       hasMovedRef.current = false;
@@ -310,14 +352,14 @@ function CubeSegment({
   const handlePointerMove = (e) => {
     // Проверяем, было ли движение мыши с момента нажатия
     if (pointerDownRef.current) {
-      const clientX = e.clientX || (e.touches?.[0]?.clientX);
-      const clientY = e.clientY || (e.touches?.[0]?.clientY);
-      
+      const clientX = e.clientX || e.touches?.[0]?.clientX;
+      const clientY = e.clientY || e.touches?.[0]?.clientY;
+
       if (clientX !== undefined && clientY !== undefined) {
         const dx = Math.abs(clientX - pointerDownRef.current.x);
         const dy = Math.abs(clientY - pointerDownRef.current.y);
         const distance = Math.sqrt(dx * dx + dy * dy);
-        
+
         // Если движение больше 8 пикселей, считаем это drag
         if (distance > 8) {
           hasMovedRef.current = true;
@@ -328,21 +370,25 @@ function CubeSegment({
 
   const handlePointerUp = (e) => {
     e.stopPropagation();
-    
+
     // Если было движение, это не клик, а завершение drag
     if (!pointerDownRef.current) {
       return;
     }
 
     // Проверяем финальную позицию - если она сильно отличается от начальной, это был drag
-    const clientX = e.clientX || (e.changedTouches?.[0]?.clientX);
-    const clientY = e.clientY || (e.changedTouches?.[0]?.clientY);
-    
-    if (clientX !== undefined && clientY !== undefined && pointerDownRef.current) {
+    const clientX = e.clientX || e.changedTouches?.[0]?.clientX;
+    const clientY = e.clientY || e.changedTouches?.[0]?.clientY;
+
+    if (
+      clientX !== undefined &&
+      clientY !== undefined &&
+      pointerDownRef.current
+    ) {
       const dx = Math.abs(clientX - pointerDownRef.current.x);
       const dy = Math.abs(clientY - pointerDownRef.current.y);
       const finalDistance = Math.sqrt(dx * dx + dy * dy);
-      
+
       // Если финальное расстояние больше 5 пикселей, это был drag
       if (finalDistance > 5 || hasMovedRef.current) {
         pointerDownRef.current = null;
@@ -397,7 +443,7 @@ function CubeSegment({
       }}
     >
       <planeGeometry args={[segmentSize, segmentSize]} />
-      <meshStandardMaterial 
+      <meshStandardMaterial
         ref={materialRef}
         color={0x3390ec}
         side={THREE.DoubleSide}
@@ -409,14 +455,16 @@ function CubeSegment({
 }
 
 // Компонент для одной стороны куба, разделенной на сегменты
-function CubeSide({ 
-  name, 
-  position, 
-  rotation, 
-  onPartClick, 
+function CubeSide({
+  name,
+  position,
+  rotation,
+  onPartClick,
   selectedPart,
+  selectedParts,
   segmentsPerSide = 20, // Количество сегментов по одной стороне (20x20 = 400 сегментов)
-  segmentTextures // Map с URL изображений для сегментов
+  segmentTextures, // Map с URL изображений для сегментов
+  dependencies, // Map зависимостей
 }) {
   const size = 2; // Размер стороны куба
   const segmentSize = size / segmentsPerSide; // Размер одного сегмента
@@ -445,7 +493,9 @@ function CubeSide({
           segmentSize={segmentSize}
           onPartClick={onPartClick}
           selectedPart={selectedPart}
+          selectedParts={selectedParts}
           segmentTextures={segmentTextures}
+          dependencies={dependencies}
         />
       );
     }
@@ -460,7 +510,13 @@ function CubeSide({
 }
 
 // Кликабельный куб, состоящий из 6 отдельных сторон
-function ClickableBox({ onPartClick, selectedPart, segmentTextures }) {
+function ClickableBox({
+  onPartClick,
+  selectedPart,
+  selectedParts,
+  segmentTextures,
+  dependencies,
+}) {
   const size = 2;
   const halfSize = size / 2;
 
@@ -508,8 +564,10 @@ function ClickableBox({ onPartClick, selectedPart, segmentTextures }) {
           rotation={side.rotation}
           onPartClick={onPartClick}
           selectedPart={selectedPart}
+          selectedParts={selectedParts}
           segmentsPerSide={20}
           segmentTextures={segmentTextures}
+          dependencies={dependencies}
         />
       ))}
     </group>
@@ -519,7 +577,7 @@ function ClickableBox({ onPartClick, selectedPart, segmentTextures }) {
 // Компонент для установки фиксированного фона
 function BackgroundColor() {
   const { gl } = useThree();
-  
+
   useEffect(() => {
     // Устанавливаем фиксированный белый фон
     gl.setClearColor(0xffffff, 1);
@@ -533,13 +591,22 @@ function BackgroundColor() {
   return null;
 }
 
+// Компонент ConnectionLines удален - теперь используется визуальное выделение зависимых сегментов через цвет в CubeSegment
+
 // Компонент для отображения сцены
-function Scene({ modelUrl, onPartClick, selectedPart, segmentTextures }) {
+function Scene({
+  modelUrl,
+  onPartClick,
+  selectedPart,
+  selectedParts,
+  segmentTextures,
+  dependencies,
+}) {
   return (
     <>
       {/* Фиксированный цвет фона сцены */}
       <BackgroundColor />
-      
+
       {/* Освещение */}
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 5]} intensity={1} />
@@ -551,16 +618,22 @@ function Scene({ modelUrl, onPartClick, selectedPart, segmentTextures }) {
       {/* 3D модель */}
       {modelUrl && (
         <Suspense fallback={null}>
-          <Model url={modelUrl} onPartClick={onPartClick} selectedPart={selectedPart} />
+          <Model
+            url={modelUrl}
+            onPartClick={onPartClick}
+            selectedPart={selectedPart}
+          />
         </Suspense>
       )}
 
       {/* Геометрическая фигура по умолчанию, если модель не загружена */}
       {!modelUrl && (
-        <ClickableBox 
+        <ClickableBox
           onPartClick={onPartClick}
           selectedPart={selectedPart}
+          selectedParts={selectedParts}
           segmentTextures={segmentTextures}
+          dependencies={dependencies}
         />
       )}
 
@@ -579,28 +652,37 @@ function Scene({ modelUrl, onPartClick, selectedPart, segmentTextures }) {
   );
 }
 
-function ModelViewer({ modelUrl, onPartClick, selectedPart, segmentTextures }) {
+function ModelViewer({
+  modelUrl,
+  onPartClick,
+  selectedPart,
+  selectedParts,
+  segmentTextures,
+  dependencies,
+}) {
   return (
     <div className="model-viewer-container">
       <Canvas
         camera={{ position: [0, 0, 3.5], fov: 50 }}
         style={{ width: "100%", height: "100%", background: "#ffffff" }}
-        gl={{ 
+        gl={{
           preserveDrawingBuffer: false,
           alpha: false, // Отключаем прозрачность для стабильного фона
         }}
-        onCreated={({ gl, scene }) => {
+        onCreated={({ gl }) => {
           // Устанавливаем фиксированный цвет фона
           gl.setClearColor(0xffffff, 1);
           // Отключаем autoClear, чтобы фон не менялся
           gl.autoClear = true;
         }}
       >
-        <Scene 
-          modelUrl={modelUrl} 
-          onPartClick={onPartClick} 
+        <Scene
+          modelUrl={modelUrl}
+          onPartClick={onPartClick}
           selectedPart={selectedPart}
+          selectedParts={selectedParts}
           segmentTextures={segmentTextures}
+          dependencies={dependencies}
         />
       </Canvas>
     </div>

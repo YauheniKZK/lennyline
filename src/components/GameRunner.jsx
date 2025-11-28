@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Phaser from "phaser";
 import "./Game.css";
 import packageJson from "../../package.json";
@@ -10,32 +10,41 @@ const APP_VERSION = packageJson.version;
 const GRAVITY = 600;
 const JUMP_STRENGTH = -400;
 const OBSTACLE_SPEED = 200;
-const OBSTACLE_SPAWN_INTERVAL = 2000;
 const PLATFORM_SPAWN_INTERVAL = 3000;
+const WALL_SPAWN_INTERVAL = 4000; // Интервал появления вертикальных стен
 const PLAYER_WIDTH = 40;
 const PLAYER_HEIGHT = 60;
-const OBSTACLE_WIDTH = 30;
-const OBSTACLE_HEIGHT = 50;
 const PLATFORM_WIDTH = 80;
 const PLATFORM_HEIGHT = 15;
+const PLATFORM_MIN_DISTANCE = 200; // Минимальное расстояние между платформами
+const WALL_WIDTH = 40; // Ширина вертикальной стены
+const WALL_GAP_MIN = PLAYER_HEIGHT * 2; // Минимальный размер отверстия (два персонажа)
+const WALL_GAP_MAX = PLAYER_HEIGHT * 3; // Максимальный размер отверстия (три персонажа)
 
 // Класс игровой сцены Phaser
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: "GameScene" });
     this.player = null;
-    this.obstacles = null;
     this.platforms = null;
+    this.walls = null; // Группа для вертикальных стен
     this.ground = null;
     this.scoreText = null;
     this.scoreValue = 0;
-    this.obstacleSpawnTimer = 0;
     this.platformSpawnTimer = 0;
+    this.wallSpawnTimer = 0; // Таймер для генерации стен
     this.isGameActive = true;
     this.onScoreUpdate = null;
     this.onGameOver = null;
     this.jumpCount = 0; // Счетчик прыжков для двойного прыжка
     this.maxJumps = 2; // Максимальное количество прыжков
+    this.isFlipped = false; // Флаг переворота персонажа
+    this.flipTimer = 0; // Таймер для возврата из перевернутого состояния
+    this.boostTimer = 0; // Таймер ускорения при перевороте
+    this.boostSpeed = 0; // Текущая скорость ускорения
+    this.baseVelocityX = 0; // Базовая скорость по X без ускорения
+    this.fixedVelocityY = null; // Фиксированная скорость по Y во время ускорения
+    this.onFlipAction = null; // Колбэк для уведомления о перевороте
   }
 
   init(data) {
@@ -56,15 +65,16 @@ class GameScene extends Phaser.Scene {
 
     this.add
       .graphics()
-      .fillStyle(0xe74c3c)
-      .fillRect(0, 0, OBSTACLE_WIDTH, OBSTACLE_HEIGHT)
-      .generateTexture("obstacle", OBSTACLE_WIDTH, OBSTACLE_HEIGHT);
-
-    this.add
-      .graphics()
       .fillStyle(0x4a4a4a)
       .fillRect(0, 0, PLATFORM_WIDTH, PLATFORM_HEIGHT)
       .generateTexture("platform", PLATFORM_WIDTH, PLATFORM_HEIGHT);
+
+    // Текстура для вертикальной стены
+    this.add
+      .graphics()
+      .fillStyle(0xff6b6b)
+      .fillRect(0, 0, WALL_WIDTH, 100) // Высота будет динамической
+      .generateTexture("wall", WALL_WIDTH, 100);
   }
 
   create() {
@@ -91,16 +101,17 @@ class GameScene extends Phaser.Scene {
     this.player.setCollideWorldBounds(false);
     this.player.body.setSize(PLAYER_WIDTH, PLAYER_HEIGHT);
 
-    // Группы для препятствий и платформ
-    this.obstacles = this.physics.add.group();
+    // Группы для платформ
     this.platforms = this.physics.add.group();
+    this.walls = this.physics.add.group(); // Группа для вертикальных стен
 
     // Физика столкновений
     this.physics.add.collider(this.player, this.ground);
     this.physics.add.collider(this.player, this.platforms);
+    // Столкновение со стенами
     this.physics.add.overlap(
       this.player,
-      this.obstacles,
+      this.walls,
       this.hitObstacle,
       null,
       this
@@ -140,6 +151,219 @@ class GameScene extends Phaser.Scene {
     }
   }
 
+  // Переворот персонажа в горизонтальное положение
+  flipPlayer() {
+    if (!this.isGameActive || this.isFlipped) return; // Не переворачиваем, если уже перевернут
+
+    this.isFlipped = true;
+    this.flipTimer = 1000; // 1 секунда в миллисекундах
+
+    // Переворачиваем персонажа: меняем размеры коллайдера и визуальное отображение
+    // При перевороте персонаж становится горизонтальным: высота уменьшается, ширина увеличивается
+
+    // Визуально поворачиваем спрайт на 90 градусов
+    this.player.setAngle(90);
+
+    // Меняем размеры коллайдера
+    // После поворота на 90° по часовой стрелке коллайдер поворачивается вместе со спрайтом
+    // В мировых координатах после поворота:
+    // - мировая ширина (по оси X) = локальная высота
+    // - мировая высота (по оси Y) = локальная ширина
+    // Мы хотим получить мировую высоту 40px (меньше) и ширину 60px (больше)
+    // Поэтому устанавливаем локальные размеры как height x width (60 x 40)
+    // После поворота это даст мировую высоту 40px и ширину 60px
+
+    // Используем setSize с центрированием
+    this.player.body.setSize(PLAYER_HEIGHT, PLAYER_WIDTH, true);
+
+    // Также обновляем через setBodySize если доступно (для более надежного обновления)
+    if (this.player.body.setBodySize) {
+      this.player.body.setBodySize(PLAYER_HEIGHT, PLAYER_WIDTH, true);
+    }
+
+    // Принудительно обновляем размеры через прямой доступ
+    this.player.body.width = PLAYER_HEIGHT;
+    this.player.body.height = PLAYER_WIDTH;
+
+    // Обновляем размеры отображения для визуального соответствия
+    this.player.setDisplaySize(PLAYER_WIDTH, PLAYER_HEIGHT);
+
+    // Обновляем центр коллайдера
+    this.player.body.updateCenter();
+
+    // Принудительно обновляем физическое тело
+    this.player.body.updateFromGameObject();
+
+    // Добавляем ускорение вперед при перевороте (длится 1 секунду)
+    const initialBoostSpeed = 300; // Начальная скорость ускорения вперед
+    this.baseVelocityX = this.player.body.velocity.x; // Сохраняем базовую скорость
+    this.boostSpeed = initialBoostSpeed;
+    this.boostTimer = 1000; // 1 секунда в миллисекундах
+    // Сохраняем и фиксируем скорость по Y на время ускорения
+    this.fixedVelocityY = this.player.body.velocity.y;
+    // Полностью отключаем гравитацию на время ускорения
+    this.player.body.setAllowGravity(false);
+    this.player.body.setGravityY(0);
+    // Применяем ускорение только по X, Y остается фиксированным
+    this.player.setVelocity(
+      this.baseVelocityX + initialBoostSpeed,
+      this.fixedVelocityY
+    );
+
+    // Уведомляем о перевороте
+    if (this.onFlipAction) {
+      this.onFlipAction(true);
+    }
+  }
+
+  // Возврат персонажа в вертикальное положение
+  unflipPlayer() {
+    if (!this.isFlipped) return;
+
+    this.isFlipped = false;
+    this.flipTimer = 0;
+
+    // Возвращаем персонажа в нормальное состояние
+    // Сначала возвращаем размеры коллайдера
+    this.player.body.setSize(PLAYER_WIDTH, PLAYER_HEIGHT, true); // Возвращаем размеры коллайдера 40x60 с центрированием
+
+    // Затем возвращаем угол
+    this.player.setAngle(0);
+
+    // Возвращаем размеры отображения
+    this.player.setDisplaySize(PLAYER_WIDTH, PLAYER_HEIGHT);
+
+    // Принудительно обновляем размеры тела для debug визуализации
+    this.player.body.width = PLAYER_WIDTH;
+    this.player.body.height = PLAYER_HEIGHT;
+
+    // Обновляем центр коллайдера
+    if (this.player.body.updateCenter) {
+      this.player.body.updateCenter();
+    }
+
+    // Обновляем размеры тела через refreshBody если доступно
+    if (this.player.body.refreshBody) {
+      this.player.body.refreshBody();
+    }
+
+    // Восстанавливаем гравитацию при возврате из перевернутого состояния
+    // Это гарантирует, что гравитация всегда восстановится после переворота
+
+    // Сбрасываем fixedVelocityY если он еще установлен
+    this.fixedVelocityY = null;
+
+    // Также сбрасываем таймеры ускорения, если они еще активны
+    this.boostTimer = 0;
+    this.boostSpeed = 0;
+
+    // Восстанавливаем гравитацию
+    this.player.body.setAllowGravity(true);
+    this.player.body.setGravityY(GRAVITY);
+
+    // Принудительно обновляем физическое тело для применения гравитации
+    this.player.body.updateFromGameObject();
+
+    // Убеждаемся, что мы не фиксируем скорость по Y - позволяем гравитации работать
+    // Не устанавливаем скорость по Y вручную после этого момента
+
+    // Уведомляем о возврате
+    if (this.onFlipAction) {
+      this.onFlipAction(false);
+    }
+  }
+
+  // Создание вертикальной стены с отверстием (логика как в Flappy Bird)
+  createWall(x, height, groundY) {
+    // Генерируем случайный размер отверстия от высоты персонажа до двух высот
+    const gapSize =
+      WALL_GAP_MIN + Math.random() * (WALL_GAP_MAX - WALL_GAP_MIN);
+
+    // Вычисляем позицию центра отверстия (случайная высота)
+    // Отверстие должно быть доступно для прохождения
+    const minGapTop = 50; // Минимальная позиция верхнего края отверстия (от верха)
+    const maxGapTop = groundY - gapSize - 50; // Максимальная позиция верхнего края отверстия
+    const gapTop = minGapTop + Math.random() * (maxGapTop - minGapTop);
+    const gapBottom = gapTop + gapSize; // Нижний край отверстия
+
+    // Верхняя часть стены (от верха canvas до верхнего края отверстия)
+    const topWallHeight = gapTop; // Высота верхней стены = расстояние от верха до отверстия
+    if (topWallHeight > 20) {
+      // Создаем спрайт верхней стены
+      // Используем подход из примера: origin (0, 0) - верх слева в позиции y
+      // Позиционируем верх стены в верхней части canvas (y=0)
+      const topWall = this.walls.create(x, 0, "wall");
+
+      // Устанавливаем origin (как в примере)
+      topWall.setOrigin(0, 0); // верх слева в позиции y
+
+      // Устанавливаем размеры отображения
+      topWall.setDisplaySize(WALL_WIDTH, topWallHeight);
+
+      // Настраиваем физику (как в примере - без setSize, коллайдер автоматически)
+      topWall.setVelocityX(-OBSTACLE_SPEED);
+      topWall.body.allowGravity = false;
+      topWall.body.setImmovable(true);
+      topWall.setCollideWorldBounds(false);
+    }
+
+    // Нижняя часть стены (от нижнего края отверстия до земли)
+    const bottomWallHeight = groundY - gapBottom; // Высота нижней стены
+    if (bottomWallHeight > 20) {
+      // Создаем спрайт нижней стены
+      // Используем подход из примера: origin (0, 0) - верх слева в позиции y
+      // Позиционируем верх стены в нижней части отверстия (y=gapBottom)
+      const bottomWall = this.walls.create(x, gapBottom, "wall");
+
+      // Устанавливаем origin (как в примере)
+      bottomWall.setOrigin(0, 0); // верх слева в позиции y
+
+      // Устанавливаем размеры отображения
+      bottomWall.setDisplaySize(WALL_WIDTH, bottomWallHeight);
+
+      // Настраиваем физику (как в примере - без setSize, коллайдер автоматически)
+      bottomWall.setVelocityX(-OBSTACLE_SPEED);
+      bottomWall.body.allowGravity = false;
+      bottomWall.body.setImmovable(true);
+      bottomWall.setCollideWorldBounds(false);
+
+      // Логирование для отладки
+      console.log("=== НИЖНЯЯ СТЕНА ===");
+      console.log("Позиция спрайта (x, y):", bottomWall.x, bottomWall.y);
+      console.log("Origin спрайта:", bottomWall.originX, bottomWall.originY);
+      console.log(
+        "Размеры спрайта (displayWidth, displayHeight):",
+        bottomWall.displayWidth,
+        bottomWall.displayHeight
+      );
+      console.log(
+        "Размеры коллайдера (width, height):",
+        bottomWall.body.width,
+        bottomWall.body.height
+      );
+      console.log(
+        "Offset коллайдера (x, y):",
+        bottomWall.body.offset.x,
+        bottomWall.body.offset.y
+      );
+      console.log(
+        "Позиция коллайдера (x, y):",
+        bottomWall.body.x,
+        bottomWall.body.y
+      );
+      console.log("Визуальные границы спрайта:");
+      console.log("  Верх:", bottomWall.y - bottomWall.displayHeight / 2);
+      console.log("  Низ:", bottomWall.y + bottomWall.displayHeight / 2);
+      console.log("Границы коллайдера:");
+      console.log("  Верх:", bottomWall.body.top);
+      console.log("  Низ:", bottomWall.body.bottom);
+      console.log("  Лево:", bottomWall.body.left);
+      console.log("  Право:", bottomWall.body.right);
+      console.log("groundY:", groundY);
+      console.log("gapBottom:", gapBottom);
+    }
+  }
+
   hitObstacle() {
     if (!this.isGameActive) return;
     console.log("Hit obstacle! Game over!");
@@ -156,14 +380,95 @@ class GameScene extends Phaser.Scene {
   // Метод для сброса состояния перед перезапуском
   resetState() {
     this.scoreValue = 0;
-    this.obstacleSpawnTimer = 0;
     this.platformSpawnTimer = 0;
+    this.wallSpawnTimer = 0; // Сбрасываем таймер стен
     this.isGameActive = true;
     this.jumpCount = 0; // Сбрасываем счетчик прыжков
+    // Сбрасываем состояние переворота
+    if (this.isFlipped) {
+      this.unflipPlayer();
+    }
+    this.flipTimer = 0;
+    this.boostTimer = 0;
+    this.boostSpeed = 0;
   }
 
   update(time, delta) {
     if (!this.isGameActive) return;
+
+    // Проверка: если персонаж достиг левого края canvas - проигрыш
+    if (this.player.x <= 0) {
+      this.hitObstacle();
+      return;
+    }
+
+    // Минимальное время между генерацией платформы и стены (мс)
+    const minTimeBetweenSpawns = 500;
+
+    // Обработка таймера ускорения при перевороте
+    // Фиксируем скорость по Y только если переворот активен И fixedVelocityY установлен
+    if (this.boostTimer > 0 && this.isFlipped && this.fixedVelocityY !== null) {
+      const previousBoostSpeed = this.boostSpeed;
+      this.boostTimer -= delta;
+      // Постепенно уменьшаем ускорение до нуля за 1 секунду
+      const boostProgress = Math.max(0, this.boostTimer / 1000); // От 1 до 0
+      this.boostSpeed = 300 * boostProgress; // От 300 до 0
+
+      // Компенсируем изменение ускорения в скорости
+      const boostChange = previousBoostSpeed - this.boostSpeed;
+      const currentVelocityX = this.player.body.velocity.x;
+
+      // Поддерживаем гравитацию отключенной во время ускорения
+      this.player.body.setAllowGravity(false);
+      this.player.body.setGravityY(0);
+      // Фиксируем скорость по Y на начальном значении
+      this.player.setVelocity(
+        currentVelocityX - boostChange,
+        this.fixedVelocityY
+      );
+
+      if (this.boostTimer <= 0) {
+        this.boostTimer = 0;
+        this.boostSpeed = 0;
+        // Убираем остаточное ускорение
+        this.player.setVelocity(
+          this.player.body.velocity.x - this.boostSpeed,
+          this.fixedVelocityY
+        );
+      }
+    } else if (this.boostTimer > 0 && !this.isFlipped) {
+      // Если ускорение еще идет, но переворот закончился - просто обновляем скорость по X
+      const previousBoostSpeed = this.boostSpeed;
+      this.boostTimer -= delta;
+      const boostProgress = Math.max(0, this.boostTimer / 1000);
+      this.boostSpeed = 300 * boostProgress;
+      const boostChange = previousBoostSpeed - this.boostSpeed;
+      const currentVelocityX = this.player.body.velocity.x;
+      this.player.setVelocityX(currentVelocityX - boostChange);
+
+      if (this.boostTimer <= 0) {
+        this.boostTimer = 0;
+        this.boostSpeed = 0;
+        this.player.setVelocityX(this.player.body.velocity.x - this.boostSpeed);
+      }
+    }
+
+    // Обработка таймера переворота
+    if (this.isFlipped && this.flipTimer > 0) {
+      this.flipTimer -= delta;
+      if (this.flipTimer <= 0) {
+        this.unflipPlayer();
+      } else {
+        // Постоянно обновляем размеры коллайдера когда перевернут
+        // Это гарантирует, что коллайдер правильно отображается в debug режиме
+        if (this.player && this.player.body) {
+          this.player.body.setSize(PLAYER_HEIGHT, PLAYER_WIDTH, true);
+          this.player.body.width = PLAYER_HEIGHT;
+          this.player.body.height = PLAYER_WIDTH;
+          this.player.body.updateCenter();
+        }
+      }
+    }
 
     // Сбрасываем счетчик прыжков при приземлении
     if (
@@ -176,66 +481,182 @@ class GameScene extends Phaser.Scene {
     const { width, height } = this.scale;
     const groundY = height * 0.6;
 
-    // Создание препятствий
-    this.obstacleSpawnTimer += delta;
-    if (this.obstacleSpawnTimer >= OBSTACLE_SPAWN_INTERVAL) {
-      const obstacle = this.obstacles.create(
-        width,
-        groundY - OBSTACLE_HEIGHT / 2,
-        "obstacle"
-      );
-      obstacle.setVelocityX(-OBSTACLE_SPEED);
-      obstacle.body.setSize(OBSTACLE_WIDTH, OBSTACLE_HEIGHT);
-      obstacle.body.setGravityY(0); // Отключаем гравитацию
-      obstacle.body.setAllowGravity(false); // Запрещаем гравитацию
-      obstacle.body.setImmovable(true); // Делаем неподвижным
-      obstacle.setCollideWorldBounds(false); // Не сталкиваемся с границами мира
-      this.obstacleSpawnTimer = 0;
-    }
-
     // Создание платформ
     this.platformSpawnTimer += delta;
     if (this.platformSpawnTimer >= PLATFORM_SPAWN_INTERVAL) {
-      const minHeight = height * 0.1;
-      const maxHeight = height * 0.3;
-      const platformHeight =
-        minHeight + Math.random() * (maxHeight - minHeight);
+      // Проверяем, не будет ли создана стена в ближайшее время
+      // Если стена скоро появится, не создаем платформу
+      const timeUntilWallSpawn = WALL_SPAWN_INTERVAL - this.wallSpawnTimer;
 
-      const platform = this.platforms.create(
-        width,
-        groundY - platformHeight - PLATFORM_HEIGHT / 2,
-        "platform"
-      );
-      platform.setVelocityX(-OBSTACLE_SPEED);
-      platform.body.setSize(PLATFORM_WIDTH, PLATFORM_HEIGHT);
-      platform.body.setGravityY(0); // Отключаем гравитацию
-      platform.body.setAllowGravity(false); // Запрещаем гравитацию
-      platform.body.setImmovable(true); // Делаем неподвижным
-      platform.setCollideWorldBounds(false); // Не сталкиваемся с границами мира
-      this.platformSpawnTimer = 0;
+      if (timeUntilWallSpawn < minTimeBetweenSpawns) {
+        // Слишком близко к генерации стены, пропускаем создание платформы
+        this.platformSpawnTimer = 0;
+      } else {
+        // Проверяем расстояние до последней платформы
+        let canSpawn = true;
+        const platformsArray = this.platforms.children.entries;
+
+        if (platformsArray.length > 0) {
+          // Находим самую правую платформу (ближайшую к точке спавна)
+          let lastPlatformX = -Infinity;
+          for (const platform of platformsArray) {
+            if (platform.x > lastPlatformX) {
+              lastPlatformX = platform.x;
+            }
+          }
+
+          // Проверяем, достаточно ли расстояние до последней платформы
+          const distanceToLast = width - (lastPlatformX + PLATFORM_WIDTH);
+          if (distanceToLast < PLATFORM_MIN_DISTANCE) {
+            canSpawn = false;
+          }
+        }
+
+        if (canSpawn) {
+          const minHeight = height * 0.1;
+          const maxHeight = height * 0.3;
+
+          // Пытаемся найти подходящую высоту, которая не пересекается с существующими платформами
+          let platformY = 0;
+          let attempts = 0;
+          let foundValidPosition = false;
+
+          while (!foundValidPosition && attempts < 10) {
+            const platformHeight =
+              minHeight + Math.random() * (maxHeight - minHeight);
+            platformY = groundY - platformHeight - PLATFORM_HEIGHT / 2;
+
+            // Проверяем пересечение с существующими платформами
+            let hasOverlap = false;
+            for (const existingPlatform of platformsArray) {
+              // Проверяем, если платформы находятся близко по X (в пределах минимального расстояния)
+              const xDistance = Math.abs(width - existingPlatform.x);
+              if (xDistance < PLATFORM_MIN_DISTANCE) {
+                // Проверяем пересечение по Y
+                const existingTop = existingPlatform.y - PLATFORM_HEIGHT / 2;
+                const existingBottom = existingPlatform.y + PLATFORM_HEIGHT / 2;
+                const newTop = platformY - PLATFORM_HEIGHT / 2;
+                const newBottom = platformY + PLATFORM_HEIGHT / 2;
+
+                // Проверяем перекрытие
+                if (
+                  (newTop < existingBottom && newBottom > existingTop) ||
+                  (newTop === existingTop && newBottom === existingBottom)
+                ) {
+                  hasOverlap = true;
+                  break;
+                }
+              }
+            }
+
+            // Проверяем пересечение со стенами
+            if (!hasOverlap && this.walls && this.walls.children) {
+              const wallsArray = this.walls.children.entries;
+              const checkDistance = PLATFORM_MIN_DISTANCE + WALL_WIDTH; // Учитываем ширину стены
+
+              for (const wall of wallsArray) {
+                // Проверяем, если стена находится близко по X
+                const xDistance = Math.abs(width - wall.x);
+                if (xDistance < checkDistance) {
+                  // Проверяем пересечение по Y
+                  // Используем displayHeight для визуальной высоты стены
+                  const wallHeight =
+                    wall.displayHeight ||
+                    wall.height ||
+                    (wall.body ? wall.body.height : 0);
+                  const wallTop = wall.y - wallHeight / 2;
+                  const wallBottom = wall.y + wallHeight / 2;
+                  const platformTop = platformY - PLATFORM_HEIGHT / 2;
+                  const platformBottom = platformY + PLATFORM_HEIGHT / 2;
+
+                  // Проверяем перекрытие
+                  if (platformTop < wallBottom && platformBottom > wallTop) {
+                    hasOverlap = true;
+                    break;
+                  }
+                }
+              }
+
+              // Также проверяем, не будет ли создана стена в ближайшее время на этой позиции
+              const timeUntilWallSpawn =
+                WALL_SPAWN_INTERVAL - this.wallSpawnTimer;
+              if (timeUntilWallSpawn < minTimeBetweenSpawns) {
+                // Стена скоро будет создана, считаем что она уже есть на позиции width
+                // Проверяем, не пересечется ли платформа с потенциальной стеной
+                // Для безопасности считаем, что стена может быть на любой высоте
+                // и если платформа находится в зоне возможного создания стены, пропускаем
+                hasOverlap = true;
+              }
+            }
+
+            if (!hasOverlap) {
+              foundValidPosition = true;
+            }
+            attempts++;
+          }
+
+          // Создаем платформу только если нашли валидную позицию
+          if (foundValidPosition) {
+            const platform = this.platforms.create(
+              width,
+              platformY,
+              "platform"
+            );
+            platform.setVelocityX(-OBSTACLE_SPEED);
+            platform.body.setSize(PLATFORM_WIDTH, PLATFORM_HEIGHT);
+            platform.body.setGravityY(0); // Отключаем гравитацию
+            platform.body.setAllowGravity(false); // Запрещаем гравитацию
+            platform.body.setImmovable(true); // Делаем неподвижным
+            platform.setCollideWorldBounds(false); // Не сталкиваемся с границами мира
+          }
+
+          this.platformSpawnTimer = 0;
+        }
+      }
+    }
+
+    // Создание вертикальных стен с отверстиями
+    this.wallSpawnTimer += delta;
+    if (this.wallSpawnTimer >= WALL_SPAWN_INTERVAL) {
+      // Проверяем, не будет ли создана платформа в ближайшее время
+      // Если платформа скоро появится, не создаем стену
+      const timeUntilPlatformSpawn =
+        PLATFORM_SPAWN_INTERVAL - this.platformSpawnTimer;
+
+      if (timeUntilPlatformSpawn < minTimeBetweenSpawns) {
+        // Слишком близко к генерации платформы, пропускаем создание стены
+        this.wallSpawnTimer = 0;
+      } else {
+        this.createWall(width, height, groundY);
+        this.wallSpawnTimer = 0;
+      }
     }
 
     // Удаление объектов за экраном и подсчет счета
-    this.obstacles.children.entries.forEach((obstacle) => {
-      if (obstacle.x + OBSTACLE_WIDTH < 0) {
-        // Проверяем, прошел ли препятствие мимо игрока
+    this.platforms.children.entries.forEach((platform) => {
+      if (platform.x + PLATFORM_WIDTH < 0) {
+        platform.destroy();
+      }
+    });
+
+    // Удаление стен за экраном и подсчет счета
+    let wallPassed = false;
+    this.walls.children.entries.forEach((wall) => {
+      if (wall.x + WALL_WIDTH < 0) {
+        // Проверяем, прошел ли игрок через стену (отверстие)
         if (
-          obstacle.x + OBSTACLE_WIDTH < this.player.x &&
-          obstacle.x + OBSTACLE_WIDTH >= this.player.x - 10
+          wall.x + WALL_WIDTH < this.player.x &&
+          wall.x + WALL_WIDTH >= this.player.x - 10 &&
+          !wallPassed
         ) {
+          wallPassed = true;
           this.scoreValue++;
           if (this.onScoreUpdate) {
             this.onScoreUpdate(this.scoreValue);
           }
           this.scoreText.setText(`Счет: ${this.scoreValue}`);
         }
-        obstacle.destroy();
-      }
-    });
-
-    this.platforms.children.entries.forEach((platform) => {
-      if (platform.x + PLATFORM_WIDTH < 0) {
-        platform.destroy();
+        wall.destroy();
       }
     });
   }
@@ -247,6 +668,14 @@ function GameRunner() {
   const [isGameStarted, setIsGameStarted] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
   const [score, setScore] = useState(0);
+
+  // Функция для переворота персонажа
+  const handleFlip = useCallback(() => {
+    const scene = phaserGameRef.current?.scene.getScene("GameScene");
+    if (scene && scene.isGameActive) {
+      scene.flipPlayer();
+    }
+  }, []);
 
   // Инициализация Phaser игры
   useEffect(() => {
@@ -261,7 +690,7 @@ function GameRunner() {
         default: "arcade",
         arcade: {
           gravity: { y: GRAVITY },
-          debug: false,
+          debug: true, // Включаем debug режим для визуализации коллайдеров
         },
       },
       scene: [GameScene],
@@ -279,6 +708,8 @@ function GameRunner() {
           console.log("Game Over callback called, setting isGameOver to true");
           setIsGameOver(true);
         };
+        // Сохраняем функцию переворота в сцене для доступа из кнопки
+        scene.flipAction = handleFlip;
         console.log("Callbacks set up in scene:", scene);
       } else {
         console.warn("Scene not found when setting up callbacks");
@@ -318,7 +749,7 @@ function GameRunner() {
         phaserGameRef.current = null;
       }
     };
-  }, [isGameStarted]);
+  }, [isGameStarted, handleFlip]);
 
   const handleStart = () => {
     setIsGameStarted(true);
@@ -347,6 +778,7 @@ function GameRunner() {
           if (newScene) {
             newScene.onScoreUpdate = setScore;
             newScene.onGameOver = () => setIsGameOver(true);
+            newScene.flipAction = handleFlip;
             // Убеждаемся, что физика активна
             if (newScene.physics) {
               newScene.physics.resume();
@@ -436,6 +868,42 @@ function GameRunner() {
             >
               isGameOver: {isGameOver ? "true" : "false"} | score: {score}
             </div>
+            {/* Кнопка переворота персонажа - под поверхностью земли */}
+            {!isGameOver && (
+              <button
+                onClick={handleFlip}
+                style={{
+                  position: "absolute",
+                  top: "65%", // Под землей (земля на 60%)
+                  right: "20px",
+                  padding: "12px 24px",
+                  fontSize: "1rem",
+                  fontWeight: "600",
+                  color: "#ffffff",
+                  background: "#ff6b6b",
+                  border: "none",
+                  borderRadius: "12px",
+                  cursor: "pointer",
+                  zIndex: 1000,
+                  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
+                  transition: "transform 0.1s ease, opacity 0.2s ease",
+                }}
+                onMouseDown={(e) => {
+                  e.currentTarget.style.transform = "scale(0.95)";
+                  e.currentTarget.style.opacity = "0.8";
+                }}
+                onMouseUp={(e) => {
+                  e.currentTarget.style.transform = "scale(1)";
+                  e.currentTarget.style.opacity = "1";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "scale(1)";
+                  e.currentTarget.style.opacity = "1";
+                }}
+              >
+                Перевернуть
+              </button>
+            )}
             {isGameOver ? (
               <div className="game-overlay" style={{ display: "flex" }}>
                 <div className="game-overlay-content">

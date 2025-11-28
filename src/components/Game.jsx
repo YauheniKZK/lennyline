@@ -3,6 +3,7 @@ import "./Game.css";
 import GameMenu from "./GameMenu";
 import ModelViewer from "./ModelViewer";
 import GameDestruction from "./GameDestruction";
+import GameRunner from "./GameRunner";
 import packageJson from "../../package.json";
 
 // Версия приложения (из package.json)
@@ -112,6 +113,11 @@ function Game() {
   // Если выбран режим разрушения, показываем GameDestruction
   if (gameMode === 'destruction') {
     return <GameDestruction />;
+  }
+
+  // Если выбран режим бегуна, показываем GameRunner
+  if (gameMode === 'runner') {
+    return <GameRunner />;
   }
 
   // Режим viewer (текущая игра)

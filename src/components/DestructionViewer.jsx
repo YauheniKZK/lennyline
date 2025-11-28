@@ -158,7 +158,9 @@ function SmallCube({
 
   const handleClick = (e) => {
     e.stopPropagation();
-    e.preventDefault();
+    if (e.preventDefault && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
   };
 
   return (

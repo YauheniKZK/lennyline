@@ -36,6 +36,13 @@ function GameMenu({ onStart, onModeSelect }) {
           >
             Разрушение куба
           </button>
+          <button 
+            className="game-menu-button" 
+            onClick={handleModeClick('runner')} 
+            onTouchStart={handleTouchStart}
+          >
+            Бегун
+          </button>
         </div>
       </div>
     </div>

@@ -11,15 +11,15 @@ const GRAVITY = 800; // Уменьшена гравитация для боле�
 const JUMP_STRENGTH = -400; // Начальная скорость прыжка (высота подъема)
 const JUMP_ACCELERATION = -2500; // Ускорение прыжка (скорость набора высоты) - чем больше абсолютное значение, тем быстрее подъем
 const JUMP_DURATION = 250; // Длительность ускорения прыжка в миллисекундах (чем больше, тем дольше ускорение)
-const OBSTACLE_SPEED = 200;
+const OBSTACLE_SPEED = 400;
 const PLATFORM_SPAWN_INTERVAL = 3000;
-const WALL_SPAWN_INTERVAL = 4000; // Интервал появления вертикальных стен
+const WALL_SPAWN_INTERVAL = 6000; // Интервал появления вертикальных стен
 const PLAYER_WIDTH = 40;
 const PLAYER_HEIGHT = 60;
 const PLATFORM_WIDTH = 80;
 const PLATFORM_HEIGHT = 15;
 const PLATFORM_MIN_DISTANCE = 200; // Минимальное расстояние между платформами
-const WALL_WIDTH = 200; // Ширина вертикальной стены (увеличена для новой логики)
+const WALL_WIDTH = 400; // Ширина вертикальной стены (увеличена для новой логики)
 const WALL_GAP_MIN = PLAYER_HEIGHT * 4; // Минимальный размер отверстия (два персонажа)
 const WALL_GAP_MAX = PLAYER_HEIGHT * 6; // Максимальный размер отверстия (три персонажа)
 
@@ -1023,8 +1023,15 @@ class GameScene extends Phaser.Scene {
         PLATFORM_SPAWN_INTERVAL - this.platformSpawnTimer;
 
       if (timeUntilPlatformSpawn < minTimeBetweenSpawns) {
-        // Слишком близко к генерации платформы, пропускаем создание стены
-        this.wallSpawnTimer = 0;
+        // Слишком близко к генерации платформы, пропускаем создание стены в этом кадре
+        // НЕ сбрасываем таймер - он продолжит расти, и стена сгенерируется в следующем кадре
+        // когда условие не будет выполняться
+        // Ограничиваем таймер, чтобы он не рос бесконечно
+        if (this.wallSpawnTimer > WALL_SPAWN_INTERVAL * 2) {
+          // Если таймер слишком большой (стена долго не генерировалась), принудительно создаем
+          this.createWall(width, height, groundY);
+          this.wallSpawnTimer = 0;
+        }
       } else {
         this.createWall(width, height, groundY);
         this.wallSpawnTimer = 0;

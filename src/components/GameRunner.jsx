@@ -7,8 +7,10 @@ import packageJson from "../../package.json";
 const APP_VERSION = packageJson.version;
 
 // Константы игры
-const GRAVITY = 200; // Уменьшена гравитация для более высоких прыжков
-const JUMP_STRENGTH = -400;
+const GRAVITY = 800; // Уменьшена гравитация для более высоких прыжков
+const JUMP_STRENGTH = -400; // Начальная скорость прыжка (высота подъема)
+const JUMP_ACCELERATION = -2500; // Ускорение прыжка (скорость набора высоты) - чем больше абсолютное значение, тем быстрее подъем
+const JUMP_DURATION = 250; // Длительность ускорения прыжка в миллисекундах (чем больше, тем дольше ускорение)
 const OBSTACLE_SPEED = 200;
 const PLATFORM_SPAWN_INTERVAL = 3000;
 const WALL_SPAWN_INTERVAL = 4000; // Интервал появления вертикальных стен
@@ -41,6 +43,8 @@ class GameScene extends Phaser.Scene {
     this.onGameOver = null;
     this.jumpCount = 0; // Счетчик прыжков для двойного прыжка
     this.maxJumps = 3; // Максимальное количество прыжков
+    this.jumpAccelerationTimer = 0; // Таймер ускорения прыжка
+    this.isJumpAccelerating = false; // Флаг активного ускорения прыжка
     this.isFlipped = false; // Флаг переворота персонажа
     this.flipTimer = 0; // Таймер для возврата из перевернутого состояния
     this.boostTimer = 0; // Таймер ускорения при перевороте
@@ -186,7 +190,12 @@ class GameScene extends Phaser.Scene {
 
     // Разрешаем прыжок, если еще не использовали все доступные прыжки
     if (this.jumpCount < this.maxJumps) {
+      // Устанавливаем начальную скорость прыжка
       this.player.setVelocityY(JUMP_STRENGTH);
+      // Запускаем ускорение прыжка для контроля скорости набора высоты
+      // Ускорение будет применяться в update() через прямое изменение скорости
+      this.isJumpAccelerating = true;
+      this.jumpAccelerationTimer = JUMP_DURATION;
       this.jumpCount++;
     }
   }
@@ -233,6 +242,13 @@ class GameScene extends Phaser.Scene {
 
     // Принудительно обновляем физическое тело
     this.player.body.updateFromGameObject();
+
+    // Отключаем ускорение прыжка при перевороте
+    if (this.isJumpAccelerating) {
+      this.isJumpAccelerating = false;
+      this.jumpAccelerationTimer = 0;
+      this.player.body.setAccelerationY(0);
+    }
 
     // Добавляем ускорение вперед при перевороте (длится 1 секунду)
     const initialBoostSpeed = 300; // Начальная скорость ускорения вперед
@@ -494,6 +510,8 @@ class GameScene extends Phaser.Scene {
     this.wallSpawnTimer = 0; // Сбрасываем таймер стен
     this.isGameActive = true;
     this.jumpCount = 0; // Сбрасываем счетчик прыжков
+    this.isJumpAccelerating = false; // Сбрасываем флаг ускорения прыжка
+    this.jumpAccelerationTimer = 0; // Сбрасываем таймер ускорения прыжка
     // Сбрасываем состояние переворота
     if (this.isFlipped) {
       this.unflipPlayer();
@@ -516,6 +534,8 @@ class GameScene extends Phaser.Scene {
       });
       this.player.body.setAllowGravity(true);
       this.player.body.setGravityY(gravityToRestore);
+      // Сбрасываем ускорение прыжка
+      this.player.body.setAccelerationY(0);
       // Возвращаем персонажа в исходную позицию по X
       if (this.originalPositionX !== null) {
         this.player.x = this.originalPositionX;
@@ -587,6 +607,34 @@ class GameScene extends Phaser.Scene {
 
     // Минимальное время между генерацией платформы и стены (мс)
     const minTimeBetweenSpawns = 500;
+
+    // Обработка ускорения прыжка (контроль скорости набора высоты)
+    // Используем прямое изменение скорости вместо ускорения для лучшего контроля
+    if (this.isJumpAccelerating && this.jumpAccelerationTimer > 0) {
+      this.jumpAccelerationTimer -= delta;
+      
+      // Применяем ускорение напрямую к скорости каждый кадр
+      // JUMP_ACCELERATION - это скорость изменения скорости (пикселей в секунду в секунду)
+      const accelerationPerFrame = (JUMP_ACCELERATION * delta) / 1000; // Преобразуем в пиксели за кадр
+      const currentVelocityY = this.player.body.velocity.y;
+      const newVelocityY = currentVelocityY + accelerationPerFrame;
+      
+      // Устанавливаем новую скорость, но не позволяем ей стать слишком большой
+      // Ограничиваем максимальную скорость подъема
+      const maxUpwardVelocity = -1000; // Максимальная скорость вверх (увеличено для более быстрого подъема)
+      const finalVelocityY = Math.max(newVelocityY, maxUpwardVelocity);
+      this.player.setVelocityY(finalVelocityY);
+      
+      if (this.jumpAccelerationTimer <= 0) {
+        // Время ускорения закончилось
+        this.jumpAccelerationTimer = 0;
+        this.isJumpAccelerating = false;
+      }
+    } else if (this.isJumpAccelerating) {
+      // Если таймер закончился, но флаг еще активен - сбрасываем
+      this.isJumpAccelerating = false;
+      this.jumpAccelerationTimer = 0;
+    }
 
     // Обработка таймера ускорения при перевороте
     // Фиксируем скорость по Y только если переворот активен И fixedVelocityY установлен

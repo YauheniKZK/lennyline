@@ -17,9 +17,12 @@ const PLAYER_HEIGHT = 60;
 const PLATFORM_WIDTH = 80;
 const PLATFORM_HEIGHT = 15;
 const PLATFORM_MIN_DISTANCE = 200; // Минимальное расстояние между платформами
-const WALL_WIDTH = 40; // Ширина вертикальной стены
-const WALL_GAP_MIN = PLAYER_HEIGHT * 2; // Минимальный размер отверстия (два персонажа)
-const WALL_GAP_MAX = PLAYER_HEIGHT * 3; // Максимальный размер отверстия (три персонажа)
+const WALL_WIDTH = 200; // Ширина вертикальной стены (увеличена для новой логики)
+const WALL_GAP_MIN = PLAYER_HEIGHT * 4; // Минимальный размер отверстия (два персонажа)
+const WALL_GAP_MAX = PLAYER_HEIGHT * 6; // Максимальный размер отверстия (три персонажа)
+
+// Флаг для новой логики взаимодействия со стенами
+const NEW_WALL_LOGIC_ENABLED = true; // true - новая логика (нет проигрыша при соприкосновении), false - старая логика
 
 // Класс игровой сцены Phaser
 class GameScene extends Phaser.Scene {
@@ -37,7 +40,7 @@ class GameScene extends Phaser.Scene {
     this.onScoreUpdate = null;
     this.onGameOver = null;
     this.jumpCount = 0; // Счетчик прыжков для двойного прыжка
-    this.maxJumps = 2; // Максимальное количество прыжков
+    this.maxJumps = 3; // Максимальное количество прыжков
     this.isFlipped = false; // Флаг переворота персонажа
     this.flipTimer = 0; // Таймер для возврата из перевернутого состояния
     this.boostTimer = 0; // Таймер ускорения при перевороте
@@ -47,6 +50,10 @@ class GameScene extends Phaser.Scene {
     this.onFlipAction = null; // Колбэк для уведомления о перевороте
     this.debugLogTimer = 0; // Таймер для периодического логирования
     this.originalGravityY = null; // Сохраняем изначальную гравитацию персонажа
+    this.originalPositionX = null; // Изначальная позиция персонажа по X
+    this.returnToPositionTimer = 0; // Таймер задержки перед возвратом в исходную позицию
+    this.returnDelay = 1000; // Задержка перед возвратом (мс) - 1 секунда
+    this.returnSpeed = 100; // Скорость возврата (пикселей в секунду)
   }
 
   init(data) {
@@ -95,13 +102,19 @@ class GameScene extends Phaser.Scene {
     this.physics.add.existing(this.ground, true);
 
     // Создаем персонажа
+    const initialX = width * 0.2; // Изначальная позиция по X (20% от ширины)
     this.player = this.physics.add.sprite(
-      width * 0.2,
+      initialX,
       groundY - PLAYER_HEIGHT / 2,
       "player"
     );
     this.player.setCollideWorldBounds(false);
     this.player.body.setSize(PLAYER_WIDTH, PLAYER_HEIGHT);
+    // Сохраняем изначальную позицию по X для возврата
+    this.originalPositionX = initialX;
+    // Настраиваем физику персонажа для скольжения по препятствиям
+    this.player.body.setFriction(0, 0); // Убираем трение для скольжения
+    this.player.body.setBounce(0, 0); // Убираем отскок
     // Убеждаемся, что гравитация включена, но НЕ устанавливаем её явно
     // Позволяем Phaser использовать гравитацию из конфигурации мира
     this.player.body.setAllowGravity(true);
@@ -129,13 +142,20 @@ class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.ground);
     this.physics.add.collider(this.player, this.platforms);
     // Столкновение со стенами
-    this.physics.add.overlap(
-      this.player,
-      this.walls,
-      this.hitObstacle,
-      null,
-      this
-    );
+    if (NEW_WALL_LOGIC_ENABLED) {
+      // Новая логика: физическое взаимодействие со стенами (можно упираться, бегать по ним)
+      // но без проигрыша
+      this.physics.add.collider(this.player, this.walls);
+    } else {
+      // Старая логика: при соприкосновении со стенами - проигрыш
+      this.physics.add.overlap(
+        this.player,
+        this.walls,
+        this.hitObstacle,
+        null,
+        this
+      );
+    }
 
     // Текст счета
     this.scoreText = this.add.text(20, 20, "Счет: 0", {
@@ -429,7 +449,34 @@ class GameScene extends Phaser.Scene {
 
   hitObstacle() {
     if (!this.isGameActive) return;
+    
+    // Новая логика: при соприкосновении со стенами не заканчиваем игру
+    // Этот метод вызывается только из overlap со стенами (старая логика)
+    // При новой логике этот метод не вызывается при соприкосновении со стенами
+    if (NEW_WALL_LOGIC_ENABLED) {
+      console.log("Hit wall! (New logic: no game over)");
+      // Просто логируем, но не останавливаем игру
+      // Можно добавить визуальный эффект или звук здесь
+      return;
+    }
+    
+    // Старая логика: заканчиваем игру при соприкосновении
     console.log("Hit obstacle! Game over!");
+    this.isGameActive = false;
+    if (this.onGameOver) {
+      console.log("Calling onGameOver callback");
+      this.onGameOver();
+    } else {
+      console.warn("onGameOver callback is not set!");
+    }
+    this.physics.pause();
+  }
+
+  // Метод для проигрыша при достижении левого края
+  hitLeftEdge() {
+    if (!this.isGameActive) return;
+    
+    console.log("Hit left edge! Game over!");
     this.isGameActive = false;
     if (this.onGameOver) {
       console.log("Calling onGameOver callback");
@@ -456,6 +503,7 @@ class GameScene extends Phaser.Scene {
     this.boostSpeed = 0;
     this.fixedVelocityY = null;
     this.debugLogTimer = 0;
+    this.returnToPositionTimer = 0; // Сбрасываем таймер возврата в исходную позицию
     // Убеждаемся, что гравитация включена при сбросе состояния
     if (this.player && this.player.body) {
       const worldGravity = this.physics.world.gravity.y;
@@ -468,10 +516,17 @@ class GameScene extends Phaser.Scene {
       });
       this.player.body.setAllowGravity(true);
       this.player.body.setGravityY(gravityToRestore);
+      // Возвращаем персонажа в исходную позицию по X
+      if (this.originalPositionX !== null) {
+        this.player.x = this.originalPositionX;
+        this.player.body.x = this.originalPositionX;
+        this.player.body.updateFromGameObject();
+      }
       console.log("[RESET] После восстановления:", {
         allowGravity: this.player.body.allowGravity,
         gravityY: this.player.body.gravity.y,
         expectedGravity: gravityToRestore,
+        positionX: this.player.x,
       });
     }
   }
@@ -524,8 +579,9 @@ class GameScene extends Phaser.Scene {
     }
 
     // Проверка: если персонаж достиг левого края canvas - проигрыш
+    // Это единственный способ проиграть (независимо от логики стен)
     if (this.player.x <= 0) {
-      this.hitObstacle();
+      this.hitLeftEdge();
       return;
     }
 
@@ -673,6 +729,96 @@ class GameScene extends Phaser.Scene {
           });
         }
       }
+    }
+
+    // Восстановление движения: если персонаж был заблокирован препятствием, но теперь не касается его
+    // нужно убедиться, что он может свободно двигаться (падать под действием гравитации)
+    if (this.player && this.player.body && !this.isFlipped && this.boostTimer <= 0) {
+      const isTouchingLeft = this.player.body.touching.left;
+      const isTouchingRight = this.player.body.touching.right;
+      const isTouchingDown = this.player.body.touching.down;
+      const velocityX = this.player.body.velocity.x;
+      const velocityY = this.player.body.velocity.y;
+      
+      // Если персонаж не касается препятствий сбоку и снизу, но скорость по Y = 0 (заблокирован)
+      // это означает, что он был заблокирован препятствием, но теперь препятствие ушло
+      // Нужно убедиться, что гравитация работает и персонаж может падать
+      if (!isTouchingLeft && !isTouchingRight && !isTouchingDown && Math.abs(velocityY) < 0.1) {
+        // Персонаж не касается препятствий, но не падает - возможно заблокирован
+        // Принудительно обновляем физическое тело, чтобы гравитация работала
+        this.player.body.updateFromGameObject();
+        
+        // Если гравитация включена, но скорость по Y все еще 0, принудительно применяем гравитацию
+        if (this.player.body.allowGravity && this.player.body.gravity.y !== 0) {
+          // Не устанавливаем скорость напрямую, но обновляем тело для применения гравитации
+          this.player.body.updateFromGameObject();
+        }
+      }
+      
+      // В этой игре персонаж должен быть неподвижен по X (скорость = 0)
+      // Но если он был заблокирован препятствием и теперь не касается его, убеждаемся что скорость = 0
+      if (Math.abs(velocityX) > 0.1 && !isTouchingLeft && !isTouchingRight) {
+        // Персонаж движется по X, но не касается препятствий - сбрасываем скорость
+        this.player.setVelocityX(0);
+      }
+    }
+
+    // Логика постепенного возврата персонажа в изначальное положение по X
+    if (
+      this.player &&
+      this.player.body &&
+      this.originalPositionX !== null &&
+      !this.isFlipped &&
+      this.boostTimer <= 0
+    ) {
+      const currentX = this.player.x;
+      const targetX = this.originalPositionX;
+      const distance = Math.abs(currentX - targetX);
+      const threshold = 5; // Порог, ниже которого считаем, что персонаж уже на месте
+
+      // Проверяем, не касается ли персонаж препятствий сбоку
+      const isTouchingLeft = this.player.body.touching.left;
+      const isTouchingRight = this.player.body.touching.right;
+      const isTouchingObstacle = isTouchingLeft || isTouchingRight;
+
+      if (distance > threshold) {
+        // Персонаж отклонился от изначальной позиции
+        if (!isTouchingObstacle) {
+          // Не касается препятствий - запускаем или продолжаем таймер
+          this.returnToPositionTimer += delta;
+
+          if (this.returnToPositionTimer >= this.returnDelay) {
+            // Задержка прошла - начинаем плавный возврат через скорость
+            // Используем скорость по X вместо прямого изменения позиции, чтобы не блокировать движение по Y
+            const direction = currentX < targetX ? 1 : -1; // Направление возврата
+            const remainingDistance = Math.abs(currentX - targetX);
+            
+            // Проверяем, не достигли ли мы целевой позиции
+            if (remainingDistance < 5) {
+              // Достигли целевой позиции - останавливаем движение по X
+              this.player.setVelocityX(0);
+              this.returnToPositionTimer = 0; // Сбрасываем таймер
+            } else {
+              // Устанавливаем скорость по X для возврата, сохраняя скорость по Y
+              const currentVelocityY = this.player.body.velocity.y; // Сохраняем скорость по Y
+              this.player.setVelocityX(direction * this.returnSpeed);
+              // Убеждаемся, что скорость по Y не изменилась
+              if (Math.abs(this.player.body.velocity.y - currentVelocityY) > 0.1) {
+                this.player.setVelocityY(currentVelocityY);
+              }
+            }
+          }
+        } else {
+          // Касается препятствия - сбрасываем таймер
+          this.returnToPositionTimer = 0;
+        }
+      } else {
+        // Персонаж уже на месте - сбрасываем таймер
+        this.returnToPositionTimer = 0;
+      }
+    } else {
+      // Во время переворота или ускорения - сбрасываем таймер
+      this.returnToPositionTimer = 0;
     }
 
     // Сбрасываем счетчик прыжков при приземлении

@@ -7,7 +7,7 @@ import packageJson from "../../package.json";
 const APP_VERSION = packageJson.version;
 
 // Константы игры
-const GRAVITY = 600;
+const GRAVITY = 200; // Уменьшена гравитация для более высоких прыжков
 const JUMP_STRENGTH = -400;
 const OBSTACLE_SPEED = 200;
 const PLATFORM_SPAWN_INTERVAL = 3000;
@@ -45,6 +45,8 @@ class GameScene extends Phaser.Scene {
     this.baseVelocityX = 0; // Базовая скорость по X без ускорения
     this.fixedVelocityY = null; // Фиксированная скорость по Y во время ускорения
     this.onFlipAction = null; // Колбэк для уведомления о перевороте
+    this.debugLogTimer = 0; // Таймер для периодического логирования
+    this.originalGravityY = null; // Сохраняем изначальную гравитацию персонажа
   }
 
   init(data) {
@@ -100,6 +102,24 @@ class GameScene extends Phaser.Scene {
     );
     this.player.setCollideWorldBounds(false);
     this.player.body.setSize(PLAYER_WIDTH, PLAYER_HEIGHT);
+    // Убеждаемся, что гравитация включена, но НЕ устанавливаем её явно
+    // Позволяем Phaser использовать гравитацию из конфигурации мира
+    this.player.body.setAllowGravity(true);
+    // НЕ устанавливаем гравитацию явно - используем ту, что Phaser установил из конфигурации
+    // Сохраняем изначальную гравитацию персонажа (из конфигурации мира)
+    // Гравитация тела будет установлена Phaser'ом автоматически из конфигурации мира
+    const worldGravity = this.physics.world.gravity.y;
+    const bodyGravity = this.player.body.gravity.y;
+    // Сохраняем гравитацию мира (она должна применяться к телу автоматически)
+    // Если гравитация тела уже установлена и не 0, используем её, иначе используем гравитацию мира
+    this.originalGravityY = bodyGravity !== 0 ? bodyGravity : (worldGravity !== 0 ? worldGravity : GRAVITY);
+    console.log("[CREATE] Сохраняем изначальную гравитацию персонажа:", {
+      allowGravity: this.player.body.allowGravity,
+      bodyGravityY: bodyGravity,
+      worldGravityY: worldGravity,
+      originalGravityY: this.originalGravityY,
+      note: "Гравитация тела будет установлена Phaser автоматически из конфигурации мира",
+    });
 
     // Группы для платформ
     this.platforms = this.physics.add.group();
@@ -196,18 +216,29 @@ class GameScene extends Phaser.Scene {
 
     // Добавляем ускорение вперед при перевороте (длится 1 секунду)
     const initialBoostSpeed = 300; // Начальная скорость ускорения вперед
-    this.baseVelocityX = this.player.body.velocity.x; // Сохраняем базовую скорость
+    this.baseVelocityX = this.player.body.velocity.x; // Сохраняем базовую скорость по X
     this.boostSpeed = initialBoostSpeed;
     this.boostTimer = 1000; // 1 секунда в миллисекундах
-    // Сохраняем и фиксируем скорость по Y на время ускорения
-    this.fixedVelocityY = this.player.body.velocity.y;
+    // Останавливаем движение по Y (скорость = 0)
+    this.fixedVelocityY = 0; // Фиксируем скорость по Y на 0 (останавливаем движение вверх/вниз)
     // Полностью отключаем гравитацию на время ускорения
+    console.log("[FLIP] Отключаем гравитацию и останавливаем движение по Y. До:", {
+      allowGravity: this.player.body.allowGravity,
+      gravityY: this.player.body.gravity.y,
+      velocityY: this.player.body.velocity.y,
+      velocityX: this.player.body.velocity.x,
+    });
     this.player.body.setAllowGravity(false);
     this.player.body.setGravityY(0);
-    // Применяем ускорение только по X, Y остается фиксированным
+    console.log("[FLIP] После отключения гравитации:", {
+      allowGravity: this.player.body.allowGravity,
+      gravityY: this.player.body.gravity.y,
+      fixedVelocityY: this.fixedVelocityY,
+    });
+    // Применяем ускорение только по X, Y устанавливаем в 0 (останавливаем движение вверх/вниз)
     this.player.setVelocity(
       this.baseVelocityX + initialBoostSpeed,
-      this.fixedVelocityY
+      0 // Останавливаем движение по Y
     );
 
     // Уведомляем о перевороте
@@ -250,19 +281,51 @@ class GameScene extends Phaser.Scene {
     // Восстанавливаем гравитацию при возврате из перевернутого состояния
     // Это гарантирует, что гравитация всегда восстановится после переворота
 
-    // Сбрасываем fixedVelocityY если он еще установлен
+    console.log("[UNFLIP] Начало восстановления. До:", {
+      allowGravity: this.player.body.allowGravity,
+      gravityY: this.player.body.gravity.y,
+      fixedVelocityY: this.fixedVelocityY,
+      boostTimer: this.boostTimer,
+      velocityY: this.player.body.velocity.y,
+    });
+
+    // Сбрасываем fixedVelocityY - теперь скорость по Y будет управляться гравитацией
     this.fixedVelocityY = null;
 
     // Также сбрасываем таймеры ускорения, если они еще активны
     this.boostTimer = 0;
     this.boostSpeed = 0;
 
-    // Восстанавливаем гравитацию
+    // Восстанавливаем гравитацию - используем гравитацию мира из конфигурации Phaser
+    // Это гарантирует, что гравитация будет такой же, как в начале игры
+    const worldGravity = this.physics.world.gravity.y;
+    const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
     this.player.body.setAllowGravity(true);
-    this.player.body.setGravityY(GRAVITY);
-
+    this.player.body.setGravityY(gravityToRestore);
+    
     // Принудительно обновляем физическое тело для применения гравитации
     this.player.body.updateFromGameObject();
+    
+    // Убеждаемся, что гравитация действительно включена (дополнительная проверка)
+    if (!this.player.body.allowGravity) {
+      console.log("[UNFLIP] Гравитация была отключена, включаем снова");
+      this.player.body.setAllowGravity(true);
+    }
+    if (this.player.body.gravity.y !== gravityToRestore) {
+      console.log("[UNFLIP] Гравитация Y была неправильной, исправляем");
+      this.player.body.setGravityY(gravityToRestore);
+    }
+
+    // Скорость по X остается без изменений (сохраняется текущая скорость)
+    // Скорость по Y теперь будет управляться гравитацией (не фиксируем её)
+    console.log("[UNFLIP] После восстановления гравитации:", {
+      allowGravity: this.player.body.allowGravity,
+      gravityY: this.player.body.gravity.y,
+      expectedGravity: gravityToRestore,
+      velocityX: this.player.body.velocity.x,
+      velocityY: this.player.body.velocity.y,
+      note: "Скорость по Y теперь управляется гравитацией",
+    });
 
     // Убеждаемся, что мы не фиксируем скорость по Y - позволяем гравитации работать
     // Не устанавливаем скорость по Y вручную после этого момента
@@ -391,10 +454,74 @@ class GameScene extends Phaser.Scene {
     this.flipTimer = 0;
     this.boostTimer = 0;
     this.boostSpeed = 0;
+    this.fixedVelocityY = null;
+    this.debugLogTimer = 0;
+    // Убеждаемся, что гравитация включена при сбросе состояния
+    if (this.player && this.player.body) {
+      const worldGravity = this.physics.world.gravity.y;
+      const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
+      console.log("[RESET] Восстанавливаем гравитацию при сбросе. До:", {
+        allowGravity: this.player.body.allowGravity,
+        gravityY: this.player.body.gravity.y,
+        worldGravity: worldGravity,
+        expectedGravity: gravityToRestore,
+      });
+      this.player.body.setAllowGravity(true);
+      this.player.body.setGravityY(gravityToRestore);
+      console.log("[RESET] После восстановления:", {
+        allowGravity: this.player.body.allowGravity,
+        gravityY: this.player.body.gravity.y,
+        expectedGravity: gravityToRestore,
+      });
+    }
   }
 
   update(time, delta) {
     if (!this.isGameActive) return;
+
+    // Сохраняем реальную гравитацию персонажа при первом обновлении (если еще не сохранена)
+    // Или обновляем, если гравитация изменилась и персонаж не перевернут
+    if (this.player && this.player.body && !this.isFlipped && this.boostTimer <= 0) {
+      const currentGravity = this.player.body.gravity.y;
+      // Сохраняем гравитацию, если она еще не сохранена или если она отличается от сохраненной
+      // и персонаж в нормальном состоянии (не перевернут)
+      if (currentGravity !== 0) {
+        if (this.originalGravityY === null || this.originalGravityY === undefined) {
+          this.originalGravityY = currentGravity;
+          console.log("[UPDATE] Сохраняем реальную гравитацию персонажа при первом обновлении:", {
+            originalGravityY: this.originalGravityY,
+            bodyGravityY: currentGravity,
+          });
+        } else if (Math.abs(this.originalGravityY - currentGravity) > 1 && currentGravity < this.originalGravityY) {
+          // Если текущая гравитация меньше сохраненной (и персонаж не перевернут), обновляем
+          // Это может быть реальная изначальная гравитация
+          this.originalGravityY = currentGravity;
+          console.log("[UPDATE] Обновляем сохраненную гравитацию (найдена меньшая):", {
+            oldOriginalGravityY: this.originalGravityY,
+            newOriginalGravityY: currentGravity,
+          });
+        }
+      }
+    }
+
+    // Периодическое логирование состояния гравитации (раз в секунду)
+    this.debugLogTimer += delta;
+    if (this.debugLogTimer >= 1000) {
+      this.debugLogTimer = 0;
+      if (this.player && this.player.body) {
+        const expectedGravity = this.originalGravityY || GRAVITY;
+        console.log("[DEBUG] Состояние гравитации каждый кадр:", {
+          allowGravity: this.player.body.allowGravity,
+          gravityY: this.player.body.gravity.y,
+          expectedGravity: expectedGravity,
+          originalGravityY: this.originalGravityY,
+          isFlipped: this.isFlipped,
+          boostTimer: this.boostTimer,
+          fixedVelocityY: this.fixedVelocityY,
+          velocityY: this.player.body.velocity.y,
+        });
+      }
+    }
 
     // Проверка: если персонаж достиг левого края canvas - проигрыш
     if (this.player.x <= 0) {
@@ -421,23 +548,45 @@ class GameScene extends Phaser.Scene {
       // Поддерживаем гравитацию отключенной во время ускорения
       this.player.body.setAllowGravity(false);
       this.player.body.setGravityY(0);
-      // Фиксируем скорость по Y на начальном значении
+      // Фиксируем скорость по Y на 0 (останавливаем движение вверх/вниз)
+      // Ускоряем только по X (вправо)
       this.player.setVelocity(
         currentVelocityX - boostChange,
-        this.fixedVelocityY
+        0 // Всегда 0 во время переворота
       );
 
       if (this.boostTimer <= 0) {
+        console.log("[UPDATE] boostTimer закончился, восстанавливаем гравитацию. До:", {
+          allowGravity: this.player.body.allowGravity,
+          gravityY: this.player.body.gravity.y,
+          fixedVelocityY: this.fixedVelocityY,
+          isFlipped: this.isFlipped,
+        });
         this.boostTimer = 0;
         this.boostSpeed = 0;
-        // Убираем остаточное ускорение
-        this.player.setVelocity(
-          this.player.body.velocity.x - this.boostSpeed,
-          this.fixedVelocityY
-        );
+        // Восстанавливаем гравитацию после завершения ускорения
+        // Используем гравитацию мира из конфигурации Phaser
+        const worldGravity = this.physics.world.gravity.y;
+        const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
+        this.player.body.setAllowGravity(true);
+        this.player.body.setGravityY(gravityToRestore);
+        this.fixedVelocityY = null;
+        // Убираем остаточное ускорение только по X, Y теперь управляется гравитацией
+        this.player.setVelocityX(this.player.body.velocity.x - this.boostSpeed);
+        console.log("[UPDATE] После восстановления гравитации:", {
+          allowGravity: this.player.body.allowGravity,
+          gravityY: this.player.body.gravity.y,
+          expectedGravity: gravityToRestore,
+        });
       }
     } else if (this.boostTimer > 0 && !this.isFlipped) {
       // Если ускорение еще идет, но переворот закончился - просто обновляем скорость по X
+      console.log("[UPDATE] boostTimer > 0, но isFlipped = false. Состояние:", {
+        boostTimer: this.boostTimer,
+        isFlipped: this.isFlipped,
+        allowGravity: this.player.body.allowGravity,
+        gravityY: this.player.body.gravity.y,
+      });
       const previousBoostSpeed = this.boostSpeed;
       this.boostTimer -= delta;
       const boostProgress = Math.max(0, this.boostTimer / 1000);
@@ -447,10 +596,45 @@ class GameScene extends Phaser.Scene {
       this.player.setVelocityX(currentVelocityX - boostChange);
 
       if (this.boostTimer <= 0) {
+        console.log("[UPDATE] boostTimer закончился (isFlipped=false), восстанавливаем гравитацию. До:", {
+          allowGravity: this.player.body.allowGravity,
+          gravityY: this.player.body.gravity.y,
+        });
         this.boostTimer = 0;
         this.boostSpeed = 0;
         this.player.setVelocityX(this.player.body.velocity.x - this.boostSpeed);
+        // Убеждаемся, что гравитация включена после завершения ускорения
+        const worldGravity = this.physics.world.gravity.y;
+        const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
+        if (!this.player.body.allowGravity) {
+          console.log("[UPDATE] Гравитация была отключена, включаем");
+          this.player.body.setAllowGravity(true);
+          this.player.body.setGravityY(gravityToRestore);
+        }
+        this.fixedVelocityY = null;
+        console.log("[UPDATE] После восстановления гравитации:", {
+          allowGravity: this.player.body.allowGravity,
+          gravityY: this.player.body.gravity.y,
+          expectedGravity: gravityToRestore,
+        });
       }
+    } else if (this.boostTimer <= 0 && this.fixedVelocityY !== null) {
+      // Если таймер закончился, но fixedVelocityY еще установлен - очищаем его и восстанавливаем гравитацию
+      console.log("[UPDATE] boostTimer <= 0, но fixedVelocityY !== null. Восстанавливаем гравитацию:", {
+        boostTimer: this.boostTimer,
+        fixedVelocityY: this.fixedVelocityY,
+        allowGravity: this.player.body.allowGravity,
+        gravityY: this.player.body.gravity.y,
+      });
+      this.fixedVelocityY = null;
+      const worldGravity = this.physics.world.gravity.y;
+      const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
+      this.player.body.setAllowGravity(true);
+      this.player.body.setGravityY(gravityToRestore);
+      console.log("[UPDATE] После восстановления:", {
+        allowGravity: this.player.body.allowGravity,
+        gravityY: this.player.body.gravity.y,
+      });
     }
 
     // Обработка таймера переворота
@@ -466,6 +650,27 @@ class GameScene extends Phaser.Scene {
           this.player.body.width = PLAYER_HEIGHT;
           this.player.body.height = PLAYER_WIDTH;
           this.player.body.updateCenter();
+        }
+      }
+    }
+
+    // Страховка: если персонаж не перевернут и boostTimer = 0, гравитация должна быть включена
+    if (!this.isFlipped && this.boostTimer <= 0 && this.fixedVelocityY === null) {
+      if (this.player && this.player.body) {
+        const worldGravity = this.physics.world.gravity.y;
+        const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
+        if (!this.player.body.allowGravity || this.player.body.gravity.y !== gravityToRestore) {
+          console.log("[UPDATE] Страховка: восстанавливаем гравитацию. Было:", {
+            allowGravity: this.player.body.allowGravity,
+            gravityY: this.player.body.gravity.y,
+            expectedGravity: gravityToRestore,
+          });
+          this.player.body.setAllowGravity(true);
+          this.player.body.setGravityY(gravityToRestore);
+          console.log("[UPDATE] Страховка: после восстановления:", {
+            allowGravity: this.player.body.allowGravity,
+            gravityY: this.player.body.gravity.y,
+          });
         }
       }
     }
@@ -681,10 +886,15 @@ function GameRunner() {
   useEffect(() => {
     if (!isGameStarted || !gameRef.current) return;
 
+    // Увеличиваем размеры canvas для большего видимого пространства
+    const scaleFactor = 1.8; // Коэффициент увеличения (20% больше)
+    const gameWidth = gameRef.current.clientWidth * scaleFactor;
+    const gameHeight = gameRef.current.clientHeight * scaleFactor;
+
     const config = {
       type: Phaser.AUTO,
-      width: gameRef.current.clientWidth,
-      height: gameRef.current.clientHeight,
+      width: gameWidth,
+      height: gameHeight,
       parent: gameRef.current,
       physics: {
         default: "arcade",
@@ -695,6 +905,10 @@ function GameRunner() {
       },
       scene: [GameScene],
       backgroundColor: "#f0f0f0",
+      scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+      },
     };
 
     phaserGameRef.current = new Phaser.Game(config);

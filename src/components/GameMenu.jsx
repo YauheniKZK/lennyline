@@ -43,6 +43,13 @@ function GameMenu({ onStart, onModeSelect }) {
           >
             Бегун
           </button>
+          <button 
+            className="game-menu-button" 
+            onClick={handleModeClick('needle')} 
+            onTouchStart={handleTouchStart}
+          >
+            Иголка
+          </button>
         </div>
       </div>
     </div>

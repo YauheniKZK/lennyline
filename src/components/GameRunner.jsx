@@ -2,24 +2,31 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Phaser from "phaser";
 import "./Game.css";
 import packageJson from "../../package.json";
+import MapGenerator from "./MapGenerator";
 
 // Версия приложения
 const APP_VERSION = packageJson.version;
 
 // Константы игры
-const GRAVITY = 600;
-const JUMP_STRENGTH = -400;
-const OBSTACLE_SPEED = 200;
+const GRAVITY = 1200; // Уменьшена гравитация для более высоких прыжков
+const JUMP_STRENGTH = -400; // Начальная скорость прыжка (высота подъема)
+const JUMP_ACCELERATION = -5500; // Ускорение прыжка (скорость набора высоты) - чем больше абсолютное значение, тем быстрее подъем
+const JUMP_DURATION = 300; // Длительность ускорения прыжка в миллисекундах (чем больше, тем дольше ускорение)
+const OBSTACLE_SPEED = 1000;
 const PLATFORM_SPAWN_INTERVAL = 3000;
-const WALL_SPAWN_INTERVAL = 4000; // Интервал появления вертикальных стен
-const PLAYER_WIDTH = 40;
-const PLAYER_HEIGHT = 60;
-const PLATFORM_WIDTH = 80;
+const WALL_SPAWN_INTERVAL = 6000; // Интервал появления вертикальных стен
+const PLAYER_WIDTH = 60;
+const PLAYER_HEIGHT = 90;
+const PLATFORM_WIDTH = 150;
 const PLATFORM_HEIGHT = 15;
 const PLATFORM_MIN_DISTANCE = 200; // Минимальное расстояние между платформами
-const WALL_WIDTH = 40; // Ширина вертикальной стены
-const WALL_GAP_MIN = PLAYER_HEIGHT * 2; // Минимальный размер отверстия (два персонажа)
-const WALL_GAP_MAX = PLAYER_HEIGHT * 3; // Максимальный размер отверстия (три персонажа)
+const JUMP_FORWARD_SPEED = 150; // Скорость движения вперед при прыжке
+const WALL_WIDTH = 400; // Ширина вертикальной стены (увеличена для новой логики)
+const WALL_GAP_MIN = PLAYER_HEIGHT * 4; // Минимальный размер отверстия (два персонажа)
+const WALL_GAP_MAX = PLAYER_HEIGHT * 6; // Максимальный размер отверстия (три персонажа)
+
+// Флаг для новой логики взаимодействия со стенами
+const NEW_WALL_LOGIC_ENABLED = true; // true - новая логика (нет проигрыша при соприкосновении), false - старая логика
 
 // Класс игровой сцены Phaser
 class GameScene extends Phaser.Scene {
@@ -37,7 +44,13 @@ class GameScene extends Phaser.Scene {
     this.onScoreUpdate = null;
     this.onGameOver = null;
     this.jumpCount = 0; // Счетчик прыжков для двойного прыжка
-    this.maxJumps = 2; // Максимальное количество прыжков
+    this.maxJumps = 3; // Максимальное количество прыжков
+    this.jumpAccelerationTimer = 0; // Таймер ускорения прыжка
+    this.isJumpAccelerating = false; // Флаг активного ускорения прыжка
+    this.isChargingJump = false; // Флаг зарядки первого прыжка
+    this.jumpCharge = 0; // Накопленная сила прыжка (0-1)
+    this.maxJumpChargeTime = 1000; // Максимальное время зарядки в миллисекундах
+    this.chargeTimer = 0; // Таймер зарядки
     this.isFlipped = false; // Флаг переворота персонажа
     this.flipTimer = 0; // Таймер для возврата из перевернутого состояния
     this.boostTimer = 0; // Таймер ускорения при перевороте
@@ -45,6 +58,115 @@ class GameScene extends Phaser.Scene {
     this.baseVelocityX = 0; // Базовая скорость по X без ускорения
     this.fixedVelocityY = null; // Фиксированная скорость по Y во время ускорения
     this.onFlipAction = null; // Колбэк для уведомления о перевороте
+    this.debugLogTimer = 0; // Таймер для периодического логирования
+    this.originalGravityY = null; // Сохраняем изначальную гравитацию персонажа
+    this.originalPositionX = null; // Изначальная позиция персонажа по X
+    this.returnToPositionTimer = 0; // Таймер задержки перед возвратом в исходную позицию
+    this.returnDelay = 1000; // Задержка перед возвратом (мс) - 1 секунда
+    this.returnSpeed = 100; // Скорость возврата (пикселей в секунду)
+    this.useSavedMap = false; // Флаг использования сохраненной карты
+    this.jumpForwardDeceleration = 300; // Замедление движения вперед после прыжка (пикселей в секунду в секунду)
+    this.mapData = null; // Данные сохраненной карты
+    this.mapObstaclesCreated = false; // Флаг создания препятствий из карты
+    this.mapProgress = 0; // Прогресс прохождения карты (в пикселях)
+    this.spawnedObstacles = new Set(); // Множество уже созданных препятствий из карты
+    this.animationFrame = 0; // Текущий кадр анимации
+    this.animationTimer = 0; // Таймер для переключения кадров
+    this.animationSpeed = 150; // Скорость анимации (мс на кадр)
+  }
+
+  // Создание кадра анимации персонажа
+  createPlayerFrame(textureName, legOffset = 0, isJumping = false) {
+    const graphics = this.add.graphics();
+    
+    // Тело монстра - овальное, оранжевого цвета
+    graphics.fillStyle(0xff6b35); // Яркий оранжевый
+    graphics.fillEllipse(PLAYER_WIDTH / 2, PLAYER_HEIGHT / 2, PLAYER_WIDTH * 0.9, PLAYER_HEIGHT * 0.85);
+    
+    // Рога (два треугольника сверху)
+    const hornSize = 10;
+    const hornY = PLAYER_HEIGHT * 0.15;
+    const leftHornX = PLAYER_WIDTH * 0.25;
+    const rightHornX = PLAYER_WIDTH * 0.75;
+    graphics.fillStyle(0x8b4513); // Коричневый для рогов
+    // Левый рог
+    graphics.fillTriangle(
+      leftHornX, hornY,
+      leftHornX - hornSize / 2, hornY + hornSize,
+      leftHornX + hornSize / 2, hornY + hornSize
+    );
+    // Правый рог
+    graphics.fillTriangle(
+      rightHornX, hornY,
+      rightHornX - hornSize / 2, hornY + hornSize,
+      rightHornX + hornSize / 2, hornY + hornSize
+    );
+    
+    // Большие глаза (желтые с черными зрачками)
+    const eyeSize = 12;
+    const eyeY = PLAYER_HEIGHT * 0.4;
+    const leftEyeX = PLAYER_WIDTH * 0.3;
+    const rightEyeX = PLAYER_WIDTH * 0.7;
+    
+    // Белки глаз
+    graphics.fillStyle(0xffffff);
+    graphics.fillCircle(leftEyeX, eyeY, eyeSize);
+    graphics.fillCircle(rightEyeX, eyeY, eyeSize);
+    
+    // Зрачки (большие черные круги)
+    graphics.fillStyle(0x000000);
+    const pupilSize = 8;
+    graphics.fillCircle(leftEyeX, eyeY, pupilSize);
+    graphics.fillCircle(rightEyeX, eyeY, pupilSize);
+    
+    // Блики в глазах (белые точки)
+    graphics.fillStyle(0xffffff);
+    graphics.fillCircle(leftEyeX - 2, eyeY - 2, 2);
+    graphics.fillCircle(rightEyeX - 2, eyeY - 2, 2);
+    
+    // Рот с зубами (открытый рот)
+    const mouthY = PLAYER_HEIGHT * 0.7;
+    const mouthWidth = PLAYER_WIDTH * 0.5;
+    const mouthHeight = 12;
+    graphics.fillStyle(0x000000);
+    graphics.fillEllipse(PLAYER_WIDTH / 2, mouthY, mouthWidth, mouthHeight);
+    
+    // Зубы (белые треугольники)
+    graphics.fillStyle(0xffffff);
+    const toothSize = 4;
+    const toothY = mouthY - mouthHeight / 2 + 2;
+    // Верхние зубы
+    graphics.fillTriangle(
+      PLAYER_WIDTH / 2 - mouthWidth / 4, toothY,
+      PLAYER_WIDTH / 2 - mouthWidth / 4 - toothSize / 2, toothY + toothSize,
+      PLAYER_WIDTH / 2 - mouthWidth / 4 + toothSize / 2, toothY + toothSize
+    );
+    graphics.fillTriangle(
+      PLAYER_WIDTH / 2 + mouthWidth / 4, toothY,
+      PLAYER_WIDTH / 2 + mouthWidth / 4 - toothSize / 2, toothY + toothSize,
+      PLAYER_WIDTH / 2 + mouthWidth / 4 + toothSize / 2, toothY + toothSize
+    );
+    
+    // Ноги (большие овальные ступни)
+    const legWidth = 12;
+    const legHeight = isJumping ? 10 : 8;
+    const legY = PLAYER_HEIGHT - legHeight;
+    const leftLegX = PLAYER_WIDTH * 0.3 + legOffset;
+    const rightLegX = PLAYER_WIDTH * 0.7 - legOffset;
+    graphics.fillStyle(0xcc5500); // Темнее оранжевого для ног
+    graphics.fillEllipse(leftLegX, legY, legWidth, legHeight);
+    graphics.fillEllipse(rightLegX, legY, legWidth, legHeight);
+    
+    // Руки по бокам (маленькие овалы)
+    const armSize = 8;
+    const armY = PLAYER_HEIGHT * 0.55;
+    graphics.fillStyle(0xff6b35);
+    graphics.fillEllipse(armSize / 2, armY, armSize, armSize * 1.5);
+    graphics.fillEllipse(PLAYER_WIDTH - armSize / 2, armY, armSize, armSize * 1.5);
+    
+    // Генерируем текстуру
+    graphics.generateTexture(textureName, PLAYER_WIDTH, PLAYER_HEIGHT);
+    graphics.destroy();
   }
 
   init(data) {
@@ -56,12 +178,11 @@ class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    // Создаем простые цветные прямоугольники для объектов
-    this.add
-      .graphics()
-      .fillStyle(0x3390ec)
-      .fillRect(0, 0, PLAYER_WIDTH, PLAYER_HEIGHT)
-      .generateTexture("player", PLAYER_WIDTH, PLAYER_HEIGHT);
+    // Создаем несколько кадров анимации для персонажа
+    this.createPlayerFrame("player_idle", 0); // Стоящий
+    this.createPlayerFrame("player_run1", -2); // Бег кадр 1 (ноги сдвинуты влево)
+    this.createPlayerFrame("player_run2", 2); // Бег кадр 2 (ноги сдвинуты вправо)
+    this.createPlayerFrame("player_jump", 0, true); // Прыжок (вытянутые ноги)
 
     this.add
       .graphics()
@@ -93,13 +214,37 @@ class GameScene extends Phaser.Scene {
     this.physics.add.existing(this.ground, true);
 
     // Создаем персонажа
+    const initialX = width * 0.2; // Изначальная позиция по X (20% от ширины)
     this.player = this.physics.add.sprite(
-      width * 0.2,
+      initialX,
       groundY - PLAYER_HEIGHT / 2,
-      "player"
+      "player_idle"
     );
     this.player.setCollideWorldBounds(false);
     this.player.body.setSize(PLAYER_WIDTH, PLAYER_HEIGHT);
+    // Сохраняем изначальную позицию по X для возврата
+    this.originalPositionX = initialX;
+    // Настраиваем физику персонажа для скольжения по препятствиям
+    this.player.body.setFriction(0, 0); // Убираем трение для скольжения
+    this.player.body.setBounce(0, 0); // Убираем отскок
+    // Убеждаемся, что гравитация включена, но НЕ устанавливаем её явно
+    // Позволяем Phaser использовать гравитацию из конфигурации мира
+    this.player.body.setAllowGravity(true);
+    // НЕ устанавливаем гравитацию явно - используем ту, что Phaser установил из конфигурации
+    // Сохраняем изначальную гравитацию персонажа (из конфигурации мира)
+    // Гравитация тела будет установлена Phaser'ом автоматически из конфигурации мира
+    const worldGravity = this.physics.world.gravity.y;
+    const bodyGravity = this.player.body.gravity.y;
+    // Сохраняем гравитацию мира (она должна применяться к телу автоматически)
+    // Если гравитация тела уже установлена и не 0, используем её, иначе используем гравитацию мира
+    this.originalGravityY = bodyGravity !== 0 ? bodyGravity : (worldGravity !== 0 ? worldGravity : GRAVITY);
+    console.log("[CREATE] Сохраняем изначальную гравитацию персонажа:", {
+      allowGravity: this.player.body.allowGravity,
+      bodyGravityY: bodyGravity,
+      worldGravityY: worldGravity,
+      originalGravityY: this.originalGravityY,
+      note: "Гравитация тела будет установлена Phaser автоматически из конфигурации мира",
+    });
 
     // Группы для платформ
     this.platforms = this.physics.add.group();
@@ -109,13 +254,20 @@ class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.ground);
     this.physics.add.collider(this.player, this.platforms);
     // Столкновение со стенами
-    this.physics.add.overlap(
-      this.player,
-      this.walls,
-      this.hitObstacle,
-      null,
-      this
-    );
+    if (NEW_WALL_LOGIC_ENABLED) {
+      // Новая логика: физическое взаимодействие со стенами (можно упираться, бегать по ним)
+      // но без проигрыша
+      this.physics.add.collider(this.player, this.walls);
+    } else {
+      // Старая логика: при соприкосновении со стенами - проигрыш
+      this.physics.add.overlap(
+        this.player,
+        this.walls,
+        this.hitObstacle,
+        null,
+        this
+      );
+    }
 
     // Текст счета
     this.scoreText = this.add.text(20, 20, "Счет: 0", {
@@ -124,15 +276,252 @@ class GameScene extends Phaser.Scene {
       fontFamily: "Arial",
     });
 
+    // Визуальный индикатор силы прыжка
+    const chargeBarWidth = 200;
+    const chargeBarHeight = 20;
+    const chargeBarX = width / 2 - chargeBarWidth / 2;
+    const chargeBarY = height - 100;
+
+    // Фон полосы прогресса
+    this.chargeBarBg = this.add.rectangle(
+      chargeBarX + chargeBarWidth / 2,
+      chargeBarY,
+      chargeBarWidth,
+      chargeBarHeight,
+      0x333333,
+      0.7
+    );
+    this.chargeBarBg.setOrigin(0.5, 0.5);
+    this.chargeBarBg.setVisible(true);
+
+    // Полоса прогресса
+    this.chargeBar = this.add.rectangle(
+      chargeBarX,
+      chargeBarY,
+      0,
+      chargeBarHeight,
+      0x00ff00,
+      0.9
+    );
+    this.chargeBar.setOrigin(0, 0.5);
+    this.chargeBar.setVisible(true);
+
+    // Текст с процентом
+    this.chargeText = this.add.text(
+      chargeBarX + chargeBarWidth / 2,
+      chargeBarY,
+      "0%",
+      {
+        fontSize: "18px",
+        fill: "#ffffff",
+        fontFamily: "Arial",
+        fontStyle: "bold",
+      }
+    );
+    this.chargeText.setOrigin(0.5, 0.5);
+    this.chargeText.setVisible(true);
+
     // Управление
-    this.input.keyboard.on("keydown-SPACE", this.jump, this);
-    this.input.on("pointerdown", this.jump, this);
+    this.input.keyboard.on("keydown-SPACE", this.startJump, this);
+    this.input.keyboard.on("keyup-SPACE", this.endJump, this);
+    this.input.on("pointerdown", this.startJump, this);
+    this.input.on("pointerup", this.endJump, this);
+    
+    // Сохраняем ссылку на клавишу пробела для проверки состояния
+    this.spaceKey = this.input.keyboard.addKey('SPACE');
+    
+    // Флаги для отслеживания состояния кнопок
+    this.isPointerDown = false;
+    this.wasPointerDown = false;
+    this.isSpaceDown = false;
+    this.wasSpaceDown = false;
+
+    // Проверяем наличие сохраненной карты в localStorage
+    try {
+      const savedMap = localStorage.getItem("gameMap");
+      if (savedMap) {
+        this.mapData = JSON.parse(savedMap);
+        this.useSavedMap = true;
+        console.log("Загружена карта из localStorage:", this.mapData);
+        // Создаем препятствия из сохраненной карты
+        this.createMapObstacles();
+      } else {
+        console.log("Карта в localStorage не найдена, используется динамическая генерация");
+        this.useSavedMap = false;
+      }
+    } catch (error) {
+      console.error("Ошибка при загрузке карты из localStorage:", error);
+      this.useSavedMap = false;
+    }
 
     // Убеждаемся, что физика активна (на случай перезапуска)
     this.physics.resume();
   }
 
-  jump() {
+  // Создание препятствий из сохраненной карты (динамически по мере продвижения)
+  createMapObstacles() {
+    if (!this.mapData || !this.mapData.obstacles) return;
+
+    const { width, height } = this.scale;
+    const groundY = height * 0.6;
+
+    // Создаем препятствия, которые должны появиться на экране
+    // Препятствие должно появиться, когда его позиция в карте находится в пределах видимой области
+    const spawnRange = width * 1.5; // Создаем препятствия заранее (на 1.5 ширины экрана вперед)
+    
+    this.mapData.obstacles.forEach((obstacle, index) => {
+      const obstacleKey = `obstacle_${index}`;
+      
+      // Проверяем, не создано ли уже это препятствие
+      if (this.spawnedObstacles.has(obstacleKey)) return;
+
+      // Вычисляем, должна ли появиться препятствие
+      // Препятствие появляется справа от экрана, когда его позиция в карте близка к текущему прогрессу
+      const obstaclePositionInMap = obstacle.x;
+      const distanceFromProgress = obstaclePositionInMap - this.mapProgress;
+      
+      // Если препятствие должно появиться (в пределах spawnRange справа от экрана)
+      if (distanceFromProgress >= -width && distanceFromProgress <= spawnRange) {
+        // Вычисляем позицию на экране: препятствие появляется справа от экрана
+        // Если distanceFromProgress > 0, препятствие еще не достигло экрана, создаем его справа
+        // Если distanceFromProgress <= 0, препятствие уже должно быть видно, но мы его создаем на правом краю
+        const screenX = width + Math.max(0, distanceFromProgress);
+        
+        if (obstacle.type === "platform") {
+          // Создаем платформу
+          const platform = this.platforms.create(screenX, obstacle.y, "platform");
+          platform.setVelocityX(-OBSTACLE_SPEED);
+          platform.body.setSize(PLATFORM_WIDTH, PLATFORM_HEIGHT);
+          platform.body.setGravityY(0);
+          platform.body.setAllowGravity(false);
+          platform.body.setImmovable(true);
+          platform.setCollideWorldBounds(false);
+          // Сохраняем оригинальную позицию в карте для отслеживания
+          platform.mapX = obstacle.x;
+          this.spawnedObstacles.add(obstacleKey);
+        } else if (obstacle.type === "wall") {
+          // Создаем стену
+          this.createWallFromMap(screenX, height, groundY, obstacle.gapTop, obstacle.gapSize, obstacleKey);
+        }
+      }
+    });
+  }
+
+  // Создание стены из данных карты
+  createWallFromMap(x, height, groundY, gapTop, gapSize, obstacleKey) {
+    // Верхняя часть стены
+    const topWallHeight = gapTop;
+    if (topWallHeight > 20) {
+      const topWall = this.walls.create(x, 0, "wall");
+      topWall.setOrigin(0, 0);
+      topWall.setDisplaySize(WALL_WIDTH, topWallHeight);
+      topWall.setVelocityX(-OBSTACLE_SPEED);
+      topWall.body.allowGravity = false;
+      topWall.body.setImmovable(true);
+      topWall.setCollideWorldBounds(false);
+    }
+
+    // Нижняя часть стены
+    const gapBottom = gapTop + gapSize;
+    const bottomWallHeight = groundY - gapBottom;
+    if (bottomWallHeight > 20) {
+      const bottomWall = this.walls.create(x, gapBottom, "wall");
+      bottomWall.setOrigin(0, 0);
+      bottomWall.setDisplaySize(WALL_WIDTH, bottomWallHeight);
+      bottomWall.setVelocityX(-OBSTACLE_SPEED);
+      bottomWall.body.allowGravity = false;
+      bottomWall.body.setImmovable(true);
+      bottomWall.setCollideWorldBounds(false);
+    }
+    
+    // Отмечаем препятствие как созданное
+    if (obstacleKey) {
+      this.spawnedObstacles.add(obstacleKey);
+    }
+  }
+
+  // Начало прыжка (нажатие клавиши/клик)
+  startJump() {
+    if (!this.isGameActive) return;
+    this.isPointerDown = true;
+    this.isSpaceDown = true;
+  }
+
+  // Окончание прыжка (отпускание клавиши/клика)
+  endJump() {
+    if (!this.isGameActive) return;
+    this.isPointerDown = false;
+    this.isSpaceDown = false;
+  }
+
+  // Обновление визуального индикатора зарядки
+  updateChargeIndicator() {
+    if (!this.chargeBar || !this.chargeBarBg || !this.chargeText) return;
+
+    const chargeBarWidth = 200;
+    const chargeBarHeight = 20;
+    const chargeBarX = this.scale.width / 2 - chargeBarWidth / 2;
+    const chargeBarY = this.scale.height - 100;
+    const centerX = this.scale.width / 2;
+
+    // Обновляем позицию фона (центрируем)
+    this.chargeBarBg.setPosition(centerX, chargeBarY);
+
+    // Обновляем ширину полосы прогресса (от 0 до chargeBarWidth)
+    const currentWidth = chargeBarWidth * this.jumpCharge;
+    this.chargeBar.setSize(currentWidth, chargeBarHeight);
+    this.chargeBar.setPosition(chargeBarX, chargeBarY);
+
+    // Обновляем цвет полосы в зависимости от зарядки (зеленый -> желтый -> красный)
+    let color = 0x00ff00; // Зеленый
+    if (this.jumpCharge > 0.66) {
+      color = 0xff0000; // Красный при высокой зарядке
+    } else if (this.jumpCharge > 0.33) {
+      color = 0xffff00; // Желтый при средней зарядке
+    }
+    this.chargeBar.setFillStyle(color, 0.9);
+
+    // Обновляем позицию и текст с процентом
+    this.chargeText.setPosition(centerX, chargeBarY);
+    const percentage = Math.round(this.jumpCharge * 100);
+    this.chargeText.setText(`${percentage}%`);
+  }
+
+  // Обновление анимации персонажа
+  updatePlayerAnimation(delta, isOnGround) {
+    if (!this.player) return;
+
+    const velocityY = this.player.body.velocity.y;
+    const isInAir = !isOnGround && Math.abs(velocityY) > 10;
+
+    if (isInAir) {
+      // В воздухе - показываем кадр прыжка
+      if (this.player.texture.key !== "player_jump") {
+        this.player.setTexture("player_jump");
+      }
+    } else if (isOnGround) {
+      // На земле - анимация бега
+      this.animationTimer += delta;
+      
+      if (this.animationTimer >= this.animationSpeed) {
+        this.animationTimer = 0;
+        this.animationFrame = (this.animationFrame + 1) % 2; // Переключаем между 0 и 1
+        
+        const textureName = this.animationFrame === 0 ? "player_run1" : "player_run2";
+        if (this.player.texture.key !== textureName) {
+          this.player.setTexture(textureName);
+        }
+      }
+    } else {
+      // Стоящий (idle)
+      if (this.player.texture.key !== "player_idle") {
+        this.player.setTexture("player_idle");
+      }
+    }
+  }
+
+  // Выполнение прыжка с заданной силой
+  jump(jumpStrength = JUMP_STRENGTH) {
     if (!this.isGameActive) return;
 
     // Проверяем, стоит ли персонаж на земле или платформе
@@ -146,7 +535,15 @@ class GameScene extends Phaser.Scene {
 
     // Разрешаем прыжок, если еще не использовали все доступные прыжки
     if (this.jumpCount < this.maxJumps) {
-      this.player.setVelocityY(JUMP_STRENGTH);
+      // Устанавливаем начальную скорость прыжка с учетом силы
+      this.player.setVelocityY(jumpStrength);
+      // Добавляем движение вперед при прыжке
+      const currentVelocityX = this.player.body.velocity.x;
+      this.player.setVelocityX(currentVelocityX + JUMP_FORWARD_SPEED);
+      // Запускаем ускорение прыжка для контроля скорости набора высоты
+      // Ускорение будет применяться в update() через прямое изменение скорости
+      this.isJumpAccelerating = true;
+      this.jumpAccelerationTimer = JUMP_DURATION;
       this.jumpCount++;
     }
   }
@@ -194,20 +591,38 @@ class GameScene extends Phaser.Scene {
     // Принудительно обновляем физическое тело
     this.player.body.updateFromGameObject();
 
+    // Отключаем ускорение прыжка при перевороте
+    if (this.isJumpAccelerating) {
+      this.isJumpAccelerating = false;
+      this.jumpAccelerationTimer = 0;
+      this.player.body.setAccelerationY(0);
+    }
+
     // Добавляем ускорение вперед при перевороте (длится 1 секунду)
     const initialBoostSpeed = 300; // Начальная скорость ускорения вперед
-    this.baseVelocityX = this.player.body.velocity.x; // Сохраняем базовую скорость
+    this.baseVelocityX = this.player.body.velocity.x; // Сохраняем базовую скорость по X
     this.boostSpeed = initialBoostSpeed;
     this.boostTimer = 1000; // 1 секунда в миллисекундах
-    // Сохраняем и фиксируем скорость по Y на время ускорения
-    this.fixedVelocityY = this.player.body.velocity.y;
+    // Останавливаем движение по Y (скорость = 0)
+    this.fixedVelocityY = 0; // Фиксируем скорость по Y на 0 (останавливаем движение вверх/вниз)
     // Полностью отключаем гравитацию на время ускорения
+    console.log("[FLIP] Отключаем гравитацию и останавливаем движение по Y. До:", {
+      allowGravity: this.player.body.allowGravity,
+      gravityY: this.player.body.gravity.y,
+      velocityY: this.player.body.velocity.y,
+      velocityX: this.player.body.velocity.x,
+    });
     this.player.body.setAllowGravity(false);
     this.player.body.setGravityY(0);
-    // Применяем ускорение только по X, Y остается фиксированным
+    console.log("[FLIP] После отключения гравитации:", {
+      allowGravity: this.player.body.allowGravity,
+      gravityY: this.player.body.gravity.y,
+      fixedVelocityY: this.fixedVelocityY,
+    });
+    // Применяем ускорение только по X, Y устанавливаем в 0 (останавливаем движение вверх/вниз)
     this.player.setVelocity(
       this.baseVelocityX + initialBoostSpeed,
-      this.fixedVelocityY
+      0 // Останавливаем движение по Y
     );
 
     // Уведомляем о перевороте
@@ -250,19 +665,51 @@ class GameScene extends Phaser.Scene {
     // Восстанавливаем гравитацию при возврате из перевернутого состояния
     // Это гарантирует, что гравитация всегда восстановится после переворота
 
-    // Сбрасываем fixedVelocityY если он еще установлен
+    console.log("[UNFLIP] Начало восстановления. До:", {
+      allowGravity: this.player.body.allowGravity,
+      gravityY: this.player.body.gravity.y,
+      fixedVelocityY: this.fixedVelocityY,
+      boostTimer: this.boostTimer,
+      velocityY: this.player.body.velocity.y,
+    });
+
+    // Сбрасываем fixedVelocityY - теперь скорость по Y будет управляться гравитацией
     this.fixedVelocityY = null;
 
     // Также сбрасываем таймеры ускорения, если они еще активны
     this.boostTimer = 0;
     this.boostSpeed = 0;
 
-    // Восстанавливаем гравитацию
+    // Восстанавливаем гравитацию - используем гравитацию мира из конфигурации Phaser
+    // Это гарантирует, что гравитация будет такой же, как в начале игры
+    const worldGravity = this.physics.world.gravity.y;
+    const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
     this.player.body.setAllowGravity(true);
-    this.player.body.setGravityY(GRAVITY);
-
+    this.player.body.setGravityY(gravityToRestore);
+    
     // Принудительно обновляем физическое тело для применения гравитации
     this.player.body.updateFromGameObject();
+    
+    // Убеждаемся, что гравитация действительно включена (дополнительная проверка)
+    if (!this.player.body.allowGravity) {
+      console.log("[UNFLIP] Гравитация была отключена, включаем снова");
+      this.player.body.setAllowGravity(true);
+    }
+    if (this.player.body.gravity.y !== gravityToRestore) {
+      console.log("[UNFLIP] Гравитация Y была неправильной, исправляем");
+      this.player.body.setGravityY(gravityToRestore);
+    }
+
+    // Скорость по X остается без изменений (сохраняется текущая скорость)
+    // Скорость по Y теперь будет управляться гравитацией (не фиксируем её)
+    console.log("[UNFLIP] После восстановления гравитации:", {
+      allowGravity: this.player.body.allowGravity,
+      gravityY: this.player.body.gravity.y,
+      expectedGravity: gravityToRestore,
+      velocityX: this.player.body.velocity.x,
+      velocityY: this.player.body.velocity.y,
+      note: "Скорость по Y теперь управляется гравитацией",
+    });
 
     // Убеждаемся, что мы не фиксируем скорость по Y - позволяем гравитации работать
     // Не устанавливаем скорость по Y вручную после этого момента
@@ -366,7 +813,34 @@ class GameScene extends Phaser.Scene {
 
   hitObstacle() {
     if (!this.isGameActive) return;
+    
+    // Новая логика: при соприкосновении со стенами не заканчиваем игру
+    // Этот метод вызывается только из overlap со стенами (старая логика)
+    // При новой логике этот метод не вызывается при соприкосновении со стенами
+    if (NEW_WALL_LOGIC_ENABLED) {
+      console.log("Hit wall! (New logic: no game over)");
+      // Просто логируем, но не останавливаем игру
+      // Можно добавить визуальный эффект или звук здесь
+      return;
+    }
+    
+    // Старая логика: заканчиваем игру при соприкосновении
     console.log("Hit obstacle! Game over!");
+    this.isGameActive = false;
+    if (this.onGameOver) {
+      console.log("Calling onGameOver callback");
+      this.onGameOver();
+    } else {
+      console.warn("onGameOver callback is not set!");
+    }
+    this.physics.pause();
+  }
+
+  // Метод для проигрыша при достижении левого края
+  hitLeftEdge() {
+    if (!this.isGameActive) return;
+    
+    console.log("Hit left edge! Game over!");
     this.isGameActive = false;
     if (this.onGameOver) {
       console.log("Calling onGameOver callback");
@@ -384,6 +858,17 @@ class GameScene extends Phaser.Scene {
     this.wallSpawnTimer = 0; // Сбрасываем таймер стен
     this.isGameActive = true;
     this.jumpCount = 0; // Сбрасываем счетчик прыжков
+    this.isJumpAccelerating = false; // Сбрасываем флаг ускорения прыжка
+    this.jumpAccelerationTimer = 0; // Сбрасываем таймер ускорения прыжка
+    this.isChargingJump = false; // Сбрасываем флаг зарядки прыжка
+    this.jumpCharge = 0; // Сбрасываем накопленную силу
+    this.chargeTimer = 0; // Сбрасываем таймер зарядки
+    this.isPointerDown = false; // Сбрасываем флаг нажатия мыши/тача
+    this.wasPointerDown = false; // Сбрасываем предыдущее состояние мыши/тача
+    this.isSpaceDown = false; // Сбрасываем флаг нажатия пробела
+    this.wasSpaceDown = false; // Сбрасываем предыдущее состояние пробела
+    this.animationFrame = 0; // Сбрасываем кадр анимации
+    this.animationTimer = 0; // Сбрасываем таймер анимации
     // Сбрасываем состояние переворота
     if (this.isFlipped) {
       this.unflipPlayer();
@@ -391,19 +876,191 @@ class GameScene extends Phaser.Scene {
     this.flipTimer = 0;
     this.boostTimer = 0;
     this.boostSpeed = 0;
+    this.fixedVelocityY = null;
+    this.debugLogTimer = 0;
+    this.returnToPositionTimer = 0; // Сбрасываем таймер возврата в исходную позицию
+    this.mapObstaclesCreated = false; // Сбрасываем флаг создания препятствий из карты
+    this.mapProgress = 0; // Сбрасываем прогресс по карте
+    this.spawnedObstacles = new Set(); // Очищаем множество созданных препятствий
+    // Убеждаемся, что гравитация включена при сбросе состояния
+    if (this.player && this.player.body) {
+      const worldGravity = this.physics.world.gravity.y;
+      const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
+      console.log("[RESET] Восстанавливаем гравитацию при сбросе. До:", {
+        allowGravity: this.player.body.allowGravity,
+        gravityY: this.player.body.gravity.y,
+        worldGravity: worldGravity,
+        expectedGravity: gravityToRestore,
+      });
+      this.player.body.setAllowGravity(true);
+      this.player.body.setGravityY(gravityToRestore);
+      // Сбрасываем ускорение прыжка
+      this.player.body.setAccelerationY(0);
+      // Возвращаем персонажа в исходную позицию по X
+      if (this.originalPositionX !== null) {
+        this.player.x = this.originalPositionX;
+        this.player.body.x = this.originalPositionX;
+        this.player.body.updateFromGameObject();
+      }
+      console.log("[RESET] После восстановления:", {
+        allowGravity: this.player.body.allowGravity,
+        gravityY: this.player.body.gravity.y,
+        expectedGravity: gravityToRestore,
+        positionX: this.player.x,
+      });
+    }
   }
 
   update(time, delta) {
     if (!this.isGameActive) return;
 
+    // Сохраняем реальную гравитацию персонажа при первом обновлении (если еще не сохранена)
+    // Или обновляем, если гравитация изменилась и персонаж не перевернут
+    if (this.player && this.player.body && !this.isFlipped && this.boostTimer <= 0) {
+      const currentGravity = this.player.body.gravity.y;
+      // Сохраняем гравитацию, если она еще не сохранена или если она отличается от сохраненной
+      // и персонаж в нормальном состоянии (не перевернут)
+      if (currentGravity !== 0) {
+        if (this.originalGravityY === null || this.originalGravityY === undefined) {
+          this.originalGravityY = currentGravity;
+          console.log("[UPDATE] Сохраняем реальную гравитацию персонажа при первом обновлении:", {
+            originalGravityY: this.originalGravityY,
+            bodyGravityY: currentGravity,
+          });
+        } else if (Math.abs(this.originalGravityY - currentGravity) > 1 && currentGravity < this.originalGravityY) {
+          // Если текущая гравитация меньше сохраненной (и персонаж не перевернут), обновляем
+          // Это может быть реальная изначальная гравитация
+          this.originalGravityY = currentGravity;
+          console.log("[UPDATE] Обновляем сохраненную гравитацию (найдена меньшая):", {
+            oldOriginalGravityY: this.originalGravityY,
+            newOriginalGravityY: currentGravity,
+          });
+        }
+      }
+    }
+
+    // Периодическое логирование состояния гравитации (раз в секунду)
+    this.debugLogTimer += delta;
+    if (this.debugLogTimer >= 1000) {
+      this.debugLogTimer = 0;
+      if (this.player && this.player.body) {
+        const expectedGravity = this.originalGravityY || GRAVITY;
+        console.log("[DEBUG] Состояние гравитации каждый кадр:", {
+          allowGravity: this.player.body.allowGravity,
+          gravityY: this.player.body.gravity.y,
+          expectedGravity: expectedGravity,
+          originalGravityY: this.originalGravityY,
+          isFlipped: this.isFlipped,
+          boostTimer: this.boostTimer,
+          fixedVelocityY: this.fixedVelocityY,
+          velocityY: this.player.body.velocity.y,
+        });
+      }
+    }
+
     // Проверка: если персонаж достиг левого края canvas - проигрыш
+    // Это единственный способ проиграть (независимо от логики стен)
     if (this.player.x <= 0) {
-      this.hitObstacle();
+      this.hitLeftEdge();
       return;
     }
 
     // Минимальное время между генерацией платформы и стены (мс)
     const minTimeBetweenSpawns = 500;
+
+    // Отслеживаем состояние кнопок мыши/тача
+    const pointerIsDown = this.input.activePointer.isDown;
+    const spaceIsDown = this.spaceKey && this.spaceKey.isDown;
+    
+    // Проверяем, стоит ли персонаж на земле или платформе
+    const isOnGround =
+      this.player.body.touching.down || this.player.body.onFloor();
+
+    // Если на земле, сбрасываем счетчик прыжков
+    if (isOnGround) {
+      this.jumpCount = 0;
+    }
+
+    // Определяем, нажата ли кнопка прыжка (мышь/тач или пробел)
+    const jumpButtonDown = pointerIsDown || spaceIsDown;
+    const jumpButtonJustPressed = jumpButtonDown && (!this.wasPointerDown && !this.wasSpaceDown);
+
+    // Обработка начала зарядки (когда кнопка только что нажата)
+    if (jumpButtonJustPressed) {
+      if (isOnGround && this.jumpCount === 0) {
+        // Для первого прыжка (когда на земле) начинаем зарядку
+        this.isChargingJump = true;
+        this.jumpCharge = 0;
+        this.chargeTimer = 0;
+      } else {
+        // Для дополнительных прыжков сразу выполняем прыжок
+        this.jump(JUMP_STRENGTH);
+      }
+    }
+
+    // Обработка зарядки первого прыжка
+    if (this.isChargingJump) {
+      if (!isOnGround) {
+        // Персонаж оторвался от земли - отменяем зарядку и выполняем прыжок с минимальной силой
+        this.jump(JUMP_STRENGTH);
+        this.isChargingJump = false;
+        this.jumpCharge = 0;
+        this.chargeTimer = 0;
+      } else if (jumpButtonDown) {
+        // Кнопка все еще нажата - продолжаем зарядку
+        this.chargeTimer += delta;
+        // Накопление силы от 0 до 1 за время maxJumpChargeTime
+        this.jumpCharge = Math.min(1, this.chargeTimer / this.maxJumpChargeTime);
+      } else {
+        // Кнопка отпущена - выполняем прыжок с накопленной силой
+        const minJumpStrength = JUMP_STRENGTH;
+        const maxJumpStrength = JUMP_STRENGTH * 2;
+        const jumpStrength = minJumpStrength + (maxJumpStrength - minJumpStrength) * this.jumpCharge;
+        
+        this.jump(jumpStrength);
+        this.isChargingJump = false;
+        this.jumpCharge = 0;
+        this.chargeTimer = 0;
+      }
+    }
+
+    // Всегда обновляем визуальный индикатор (даже когда зарядка не активна, чтобы показывать 0%)
+    this.updateChargeIndicator();
+
+    // Анимация персонажа
+    this.updatePlayerAnimation(delta, isOnGround);
+
+    // Сохраняем текущее состояние для следующего кадра
+    this.wasPointerDown = pointerIsDown;
+    this.wasSpaceDown = spaceIsDown;
+
+    // Обработка ускорения прыжка (контроль скорости набора высоты)
+    // Используем прямое изменение скорости вместо ускорения для лучшего контроля
+    if (this.isJumpAccelerating && this.jumpAccelerationTimer > 0) {
+      this.jumpAccelerationTimer -= delta;
+      
+      // Применяем ускорение напрямую к скорости каждый кадр
+      // JUMP_ACCELERATION - это скорость изменения скорости (пикселей в секунду в секунду)
+      const accelerationPerFrame = (JUMP_ACCELERATION * delta) / 1000; // Преобразуем в пиксели за кадр
+      const currentVelocityY = this.player.body.velocity.y;
+      const newVelocityY = currentVelocityY + accelerationPerFrame;
+      
+      // Устанавливаем новую скорость, но не позволяем ей стать слишком большой
+      // Ограничиваем максимальную скорость подъема
+      const maxUpwardVelocity = -1000; // Максимальная скорость вверх (увеличено для более быстрого подъема)
+      const finalVelocityY = Math.max(newVelocityY, maxUpwardVelocity);
+      this.player.setVelocityY(finalVelocityY);
+      
+      if (this.jumpAccelerationTimer <= 0) {
+        // Время ускорения закончилось
+        this.jumpAccelerationTimer = 0;
+        this.isJumpAccelerating = false;
+      }
+    } else if (this.isJumpAccelerating) {
+      // Если таймер закончился, но флаг еще активен - сбрасываем
+      this.isJumpAccelerating = false;
+      this.jumpAccelerationTimer = 0;
+    }
 
     // Обработка таймера ускорения при перевороте
     // Фиксируем скорость по Y только если переворот активен И fixedVelocityY установлен
@@ -421,23 +1078,45 @@ class GameScene extends Phaser.Scene {
       // Поддерживаем гравитацию отключенной во время ускорения
       this.player.body.setAllowGravity(false);
       this.player.body.setGravityY(0);
-      // Фиксируем скорость по Y на начальном значении
+      // Фиксируем скорость по Y на 0 (останавливаем движение вверх/вниз)
+      // Ускоряем только по X (вправо)
       this.player.setVelocity(
         currentVelocityX - boostChange,
-        this.fixedVelocityY
+        0 // Всегда 0 во время переворота
       );
 
       if (this.boostTimer <= 0) {
+        console.log("[UPDATE] boostTimer закончился, восстанавливаем гравитацию. До:", {
+          allowGravity: this.player.body.allowGravity,
+          gravityY: this.player.body.gravity.y,
+          fixedVelocityY: this.fixedVelocityY,
+          isFlipped: this.isFlipped,
+        });
         this.boostTimer = 0;
         this.boostSpeed = 0;
-        // Убираем остаточное ускорение
-        this.player.setVelocity(
-          this.player.body.velocity.x - this.boostSpeed,
-          this.fixedVelocityY
-        );
+        // Восстанавливаем гравитацию после завершения ускорения
+        // Используем гравитацию мира из конфигурации Phaser
+        const worldGravity = this.physics.world.gravity.y;
+        const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
+        this.player.body.setAllowGravity(true);
+        this.player.body.setGravityY(gravityToRestore);
+        this.fixedVelocityY = null;
+        // Убираем остаточное ускорение только по X, Y теперь управляется гравитацией
+        this.player.setVelocityX(this.player.body.velocity.x - this.boostSpeed);
+        console.log("[UPDATE] После восстановления гравитации:", {
+          allowGravity: this.player.body.allowGravity,
+          gravityY: this.player.body.gravity.y,
+          expectedGravity: gravityToRestore,
+        });
       }
     } else if (this.boostTimer > 0 && !this.isFlipped) {
       // Если ускорение еще идет, но переворот закончился - просто обновляем скорость по X
+      console.log("[UPDATE] boostTimer > 0, но isFlipped = false. Состояние:", {
+        boostTimer: this.boostTimer,
+        isFlipped: this.isFlipped,
+        allowGravity: this.player.body.allowGravity,
+        gravityY: this.player.body.gravity.y,
+      });
       const previousBoostSpeed = this.boostSpeed;
       this.boostTimer -= delta;
       const boostProgress = Math.max(0, this.boostTimer / 1000);
@@ -447,10 +1126,45 @@ class GameScene extends Phaser.Scene {
       this.player.setVelocityX(currentVelocityX - boostChange);
 
       if (this.boostTimer <= 0) {
+        console.log("[UPDATE] boostTimer закончился (isFlipped=false), восстанавливаем гравитацию. До:", {
+          allowGravity: this.player.body.allowGravity,
+          gravityY: this.player.body.gravity.y,
+        });
         this.boostTimer = 0;
         this.boostSpeed = 0;
         this.player.setVelocityX(this.player.body.velocity.x - this.boostSpeed);
+        // Убеждаемся, что гравитация включена после завершения ускорения
+        const worldGravity = this.physics.world.gravity.y;
+        const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
+        if (!this.player.body.allowGravity) {
+          console.log("[UPDATE] Гравитация была отключена, включаем");
+          this.player.body.setAllowGravity(true);
+          this.player.body.setGravityY(gravityToRestore);
+        }
+        this.fixedVelocityY = null;
+        console.log("[UPDATE] После восстановления гравитации:", {
+          allowGravity: this.player.body.allowGravity,
+          gravityY: this.player.body.gravity.y,
+          expectedGravity: gravityToRestore,
+        });
       }
+    } else if (this.boostTimer <= 0 && this.fixedVelocityY !== null) {
+      // Если таймер закончился, но fixedVelocityY еще установлен - очищаем его и восстанавливаем гравитацию
+      console.log("[UPDATE] boostTimer <= 0, но fixedVelocityY !== null. Восстанавливаем гравитацию:", {
+        boostTimer: this.boostTimer,
+        fixedVelocityY: this.fixedVelocityY,
+        allowGravity: this.player.body.allowGravity,
+        gravityY: this.player.body.gravity.y,
+      });
+      this.fixedVelocityY = null;
+      const worldGravity = this.physics.world.gravity.y;
+      const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
+      this.player.body.setAllowGravity(true);
+      this.player.body.setGravityY(gravityToRestore);
+      console.log("[UPDATE] После восстановления:", {
+        allowGravity: this.player.body.allowGravity,
+        gravityY: this.player.body.gravity.y,
+      });
     }
 
     // Обработка таймера переворота
@@ -470,6 +1184,124 @@ class GameScene extends Phaser.Scene {
       }
     }
 
+    // Страховка: если персонаж не перевернут и boostTimer = 0, гравитация должна быть включена
+    if (!this.isFlipped && this.boostTimer <= 0 && this.fixedVelocityY === null) {
+      if (this.player && this.player.body) {
+        const worldGravity = this.physics.world.gravity.y;
+        const gravityToRestore = worldGravity !== 0 ? worldGravity : (this.originalGravityY || GRAVITY);
+        if (!this.player.body.allowGravity || this.player.body.gravity.y !== gravityToRestore) {
+          console.log("[UPDATE] Страховка: восстанавливаем гравитацию. Было:", {
+            allowGravity: this.player.body.allowGravity,
+            gravityY: this.player.body.gravity.y,
+            expectedGravity: gravityToRestore,
+          });
+          this.player.body.setAllowGravity(true);
+          this.player.body.setGravityY(gravityToRestore);
+          console.log("[UPDATE] Страховка: после восстановления:", {
+            allowGravity: this.player.body.allowGravity,
+            gravityY: this.player.body.gravity.y,
+          });
+        }
+      }
+    }
+
+    // Восстановление движения: если персонаж был заблокирован препятствием, но теперь не касается его
+    // нужно убедиться, что он может свободно двигаться (падать под действием гравитации)
+    if (this.player && this.player.body && !this.isFlipped && this.boostTimer <= 0) {
+      const isTouchingLeft = this.player.body.touching.left;
+      const isTouchingRight = this.player.body.touching.right;
+      const isTouchingDown = this.player.body.touching.down;
+      const velocityX = this.player.body.velocity.x;
+      const velocityY = this.player.body.velocity.y;
+      
+      // Если персонаж не касается препятствий сбоку и снизу, но скорость по Y = 0 (заблокирован)
+      // это означает, что он был заблокирован препятствием, но теперь препятствие ушло
+      // Нужно убедиться, что гравитация работает и персонаж может падать
+      if (!isTouchingLeft && !isTouchingRight && !isTouchingDown && Math.abs(velocityY) < 0.1) {
+        // Персонаж не касается препятствий, но не падает - возможно заблокирован
+        // Принудительно обновляем физическое тело, чтобы гравитация работала
+        this.player.body.updateFromGameObject();
+        
+        // Если гравитация включена, но скорость по Y все еще 0, принудительно применяем гравитацию
+        if (this.player.body.allowGravity && this.player.body.gravity.y !== 0) {
+          // Не устанавливаем скорость напрямую, но обновляем тело для применения гравитации
+          this.player.body.updateFromGameObject();
+        }
+      }
+      
+      // В этой игре персонаж должен быть неподвижен по X (скорость = 0)
+      // Но если он был заблокирован препятствием и теперь не касается его, убеждаемся что скорость = 0
+      // НО: не сбрасываем скорость во время прыжка (когда персонаж в воздухе)
+      const isInAir = !isTouchingDown && Math.abs(velocityY) > 10;
+      if (Math.abs(velocityX) > 0.1 && !isTouchingLeft && !isTouchingRight && !isInAir) {
+        // Персонаж движется по X, но не касается препятствий и не в воздухе - сбрасываем скорость
+        this.player.setVelocityX(0);
+      } else if (isInAir && velocityX > 0) {
+        // Персонаж в воздухе и движется вперед - применяем замедление
+        const deceleration = (this.jumpForwardDeceleration * delta) / 1000;
+        const newVelocityX = Math.max(0, velocityX - deceleration);
+        this.player.setVelocityX(newVelocityX);
+      }
+    }
+
+    // Логика постепенного возврата персонажа в изначальное положение по X
+    if (
+      this.player &&
+      this.player.body &&
+      this.originalPositionX !== null &&
+      !this.isFlipped &&
+      this.boostTimer <= 0
+    ) {
+      const currentX = this.player.x;
+      const targetX = this.originalPositionX;
+      const distance = Math.abs(currentX - targetX);
+      const threshold = 5; // Порог, ниже которого считаем, что персонаж уже на месте
+
+      // Проверяем, не касается ли персонаж препятствий сбоку
+      const isTouchingLeft = this.player.body.touching.left;
+      const isTouchingRight = this.player.body.touching.right;
+      const isTouchingObstacle = isTouchingLeft || isTouchingRight;
+
+      if (distance > threshold) {
+        // Персонаж отклонился от изначальной позиции
+        if (!isTouchingObstacle) {
+          // Не касается препятствий - запускаем или продолжаем таймер
+          this.returnToPositionTimer += delta;
+
+          if (this.returnToPositionTimer >= this.returnDelay) {
+            // Задержка прошла - начинаем плавный возврат через скорость
+            // Используем скорость по X вместо прямого изменения позиции, чтобы не блокировать движение по Y
+            const direction = currentX < targetX ? 1 : -1; // Направление возврата
+            const remainingDistance = Math.abs(currentX - targetX);
+            
+            // Проверяем, не достигли ли мы целевой позиции
+            if (remainingDistance < 5) {
+              // Достигли целевой позиции - останавливаем движение по X
+              this.player.setVelocityX(0);
+              this.returnToPositionTimer = 0; // Сбрасываем таймер
+            } else {
+              // Устанавливаем скорость по X для возврата, сохраняя скорость по Y
+              const currentVelocityY = this.player.body.velocity.y; // Сохраняем скорость по Y
+              this.player.setVelocityX(direction * this.returnSpeed);
+              // Убеждаемся, что скорость по Y не изменилась
+              if (Math.abs(this.player.body.velocity.y - currentVelocityY) > 0.1) {
+                this.player.setVelocityY(currentVelocityY);
+              }
+            }
+          }
+        } else {
+          // Касается препятствия - сбрасываем таймер
+          this.returnToPositionTimer = 0;
+        }
+      } else {
+        // Персонаж уже на месте - сбрасываем таймер
+        this.returnToPositionTimer = 0;
+      }
+    } else {
+      // Во время переворота или ускорения - сбрасываем таймер
+      this.returnToPositionTimer = 0;
+    }
+
     // Сбрасываем счетчик прыжков при приземлении
     if (
       this.player &&
@@ -481,7 +1313,52 @@ class GameScene extends Phaser.Scene {
     const { width, height } = this.scale;
     const groundY = height * 0.6;
 
-    // Создание платформ
+    // Если используется сохраненная карта, не генерируем препятствия динамически
+    if (this.useSavedMap) {
+      // Обновляем прогресс по карте (препятствия движутся навстречу игроку)
+      this.mapProgress += (OBSTACLE_SPEED * delta) / 1000;
+      
+      // Создаем новые препятствия из карты по мере продвижения
+      this.createMapObstacles();
+      
+      // Удаление объектов за экраном и подсчет счета
+      this.platforms.children.entries.forEach((platform) => {
+        if (platform.x + PLATFORM_WIDTH < 0) {
+          platform.destroy();
+        }
+      });
+
+      // Удаление стен за экраном и подсчет счета
+      let wallPassed = false;
+      this.walls.children.entries.forEach((wall) => {
+        if (wall.x + WALL_WIDTH < 0) {
+          // Проверяем, прошел ли игрок через стену (отверстие)
+          if (
+            wall.x + WALL_WIDTH < this.player.x &&
+            wall.x + WALL_WIDTH >= this.player.x - 10 &&
+            !wallPassed
+          ) {
+            wallPassed = true;
+            this.scoreValue++;
+            if (this.onScoreUpdate) {
+              this.onScoreUpdate(this.scoreValue);
+            }
+            this.scoreText.setText(`Счет: ${this.scoreValue}`);
+          }
+          wall.destroy();
+        }
+      });
+      
+      // Проверяем, закончилась ли карта
+      if (this.mapData && this.mapProgress >= this.mapData.length) {
+        // Карта закончилась - можно показать сообщение или завершить уровень
+        console.log("Карта пройдена!");
+      }
+      
+      return; // Прерываем выполнение, не генерируя новые препятствия
+    }
+
+    // Создание платформ (динамическая генерация)
     this.platformSpawnTimer += delta;
     if (this.platformSpawnTimer >= PLATFORM_SPAWN_INTERVAL) {
       // Проверяем, не будет ли создана стена в ближайшее время
@@ -624,8 +1501,15 @@ class GameScene extends Phaser.Scene {
         PLATFORM_SPAWN_INTERVAL - this.platformSpawnTimer;
 
       if (timeUntilPlatformSpawn < minTimeBetweenSpawns) {
-        // Слишком близко к генерации платформы, пропускаем создание стены
-        this.wallSpawnTimer = 0;
+        // Слишком близко к генерации платформы, пропускаем создание стены в этом кадре
+        // НЕ сбрасываем таймер - он продолжит расти, и стена сгенерируется в следующем кадре
+        // когда условие не будет выполняться
+        // Ограничиваем таймер, чтобы он не рос бесконечно
+        if (this.wallSpawnTimer > WALL_SPAWN_INTERVAL * 2) {
+          // Если таймер слишком большой (стена долго не генерировалась), принудительно создаем
+          this.createWall(width, height, groundY);
+          this.wallSpawnTimer = 0;
+        }
       } else {
         this.createWall(width, height, groundY);
         this.wallSpawnTimer = 0;
@@ -668,6 +1552,7 @@ function GameRunner() {
   const [isGameStarted, setIsGameStarted] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
   const [score, setScore] = useState(0);
+  const [showMapGenerator, setShowMapGenerator] = useState(false);
 
   // Функция для переворота персонажа
   const handleFlip = useCallback(() => {
@@ -681,10 +1566,15 @@ function GameRunner() {
   useEffect(() => {
     if (!isGameStarted || !gameRef.current) return;
 
+    // Увеличиваем размеры canvas для большего видимого пространства
+    const scaleFactor = 2.8; // Коэффициент увеличения (20% больше)
+    const gameWidth = gameRef.current.clientWidth * scaleFactor;
+    const gameHeight = gameRef.current.clientHeight * scaleFactor;
+
     const config = {
       type: Phaser.AUTO,
-      width: gameRef.current.clientWidth,
-      height: gameRef.current.clientHeight,
+      width: gameWidth,
+      height: gameHeight,
       parent: gameRef.current,
       physics: {
         default: "arcade",
@@ -695,6 +1585,10 @@ function GameRunner() {
       },
       scene: [GameScene],
       backgroundColor: "#f0f0f0",
+      scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+      },
     };
 
     phaserGameRef.current = new Phaser.Game(config);
@@ -827,7 +1721,15 @@ function GameRunner() {
       </div>
 
       <div className="game-area">
-        {!isGameStarted ? (
+        {showMapGenerator ? (
+          <MapGenerator
+            onSave={() => {
+              setShowMapGenerator(false);
+              alert("Карта сохранена! Теперь она будет использоваться при запуске игры.");
+            }}
+            onCancel={() => setShowMapGenerator(false)}
+          />
+        ) : !isGameStarted ? (
           <div className="game-menu">
             <div className="game-menu-content">
               <h2 className="game-menu-title">Бегун</h2>
@@ -838,6 +1740,16 @@ function GameRunner() {
 
               <button className="game-menu-button" onClick={handleStart}>
                 Старт
+              </button>
+              <button
+                className="game-menu-button"
+                onClick={() => setShowMapGenerator(true)}
+                style={{
+                  backgroundColor: "#17a2b8",
+                  marginTop: "10px",
+                }}
+              >
+                Генератор карты
               </button>
             </div>
           </div>

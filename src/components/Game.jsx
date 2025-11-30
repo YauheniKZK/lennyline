@@ -4,6 +4,7 @@ import GameMenu from "./GameMenu";
 import ModelViewer from "./ModelViewer";
 import GameDestruction from "./GameDestruction";
 import GameRunner from "./GameRunner";
+import GameNeedle from "./GameNeedle";
 import packageJson from "../../package.json";
 
 // Версия приложения (из package.json)
@@ -118,6 +119,11 @@ function Game() {
   // Если выбран режим бегуна, показываем GameRunner
   if (gameMode === 'runner') {
     return <GameRunner />;
+  }
+
+  // Если выбран режим иголки, показываем GameNeedle
+  if (gameMode === 'needle') {
+    return <GameNeedle />;
   }
 
   // Режим viewer (текущая игра)

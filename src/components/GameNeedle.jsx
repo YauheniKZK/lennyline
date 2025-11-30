@@ -7,14 +7,16 @@ import packageJson from "../../package.json";
 const APP_VERSION = packageJson.version;
 
 // Константы игры
-const NEEDLE_WIDTH = 200;
-const NEEDLE_HEIGHT = 5;
-const NEEDLE_SPEED = 400; // Скорость движения иголки вверх/вниз
+const NEEDLE_WIDTH = 80; // Длина иголки (горизонтальная)
+const NEEDLE_HEIGHT = 15; // Ширина иголки (узкая)
+const NEEDLE_SPEED = 250; // Скорость движения иголки влево/вправо (уменьшена для точности)
+const NEEDLE_ACCELERATION = 1200; // Ускорение иголки (для плавного движения)
+const NEEDLE_DECELERATION = 1000; // Замедление иголки (для точной остановки)
 const WALL_SPEED = 300; // Скорость движения стен
 const WALL_SPAWN_INTERVAL = 6000; // Интервал появления стен (мс)
-const WALL_WIDTH = 400;
-const GAP_SIZE = 40; // Размер зазора между стенами (маленький)
-const WALL_MIN_HEIGHT = 100; // Минимальная высота стены
+const WALL_WIDTH = 500; // Ширина стены (узкая, вертикальная)
+const GAP_SIZE = 30; // Размер зазора между стенами (маленький)
+const WALL_MIN_HEIGHT = 100; // Минимальная высота части стены
 
 // Класс игровой сцены Phaser
 class NeedleGameScene extends Phaser.Scene {
@@ -41,28 +43,34 @@ class NeedleGameScene extends Phaser.Scene {
   }
 
   preload() {
-    // Создаем текстуру иголки
+    // Создаем текстуру иголки (горизонтальная)
     const graphics = this.add.graphics();
     
-    // Иголка - длинный тонкий прямоугольник с острием
+    // Иголка - длинный тонкий прямоугольник с острием (горизонтальная)
     graphics.fillStyle(0x333333); // Темно-серый цвет
-    // Тело иголки (прямоугольник)
-    graphics.fillRect(0, 0, NEEDLE_WIDTH, NEEDLE_HEIGHT - 10);
-    // Острие иголки (треугольник)
+    
+    // Тело иголки (прямоугольник - горизонтальный)
+    const bodyStartX = 15; // Начинаем справа от ушка
+    const bodyWidth = NEEDLE_WIDTH - 15 - 8; // Ширина тела (минус ушко и острие)
+    graphics.fillRect(bodyStartX, 0, bodyWidth, NEEDLE_HEIGHT);
+    
+    // Острие иголки (треугольник справа)
+    const tipX = NEEDLE_WIDTH - 8; // Позиция острия
     graphics.fillTriangle(
-      NEEDLE_WIDTH / 2, NEEDLE_HEIGHT - 10, // Вершина острия
+      tipX, NEEDLE_HEIGHT / 2, // Вершина острия (справа)
       NEEDLE_WIDTH, NEEDLE_HEIGHT, // Правый нижний угол
-      0, NEEDLE_HEIGHT // Левый нижний угол
+      NEEDLE_WIDTH, 0 // Правый верхний угол
     );
     
-    // Ушко иголки (маленький круг сверху)
+    // Ушко иголки (маленький круг слева)
     graphics.fillStyle(0x666666);
-    graphics.fillCircle(NEEDLE_WIDTH / 2, 5, 6);
+    const eyeRadius = 4;
+    graphics.fillCircle(eyeRadius + 2, NEEDLE_HEIGHT / 2, eyeRadius);
     
     graphics.generateTexture("needle", NEEDLE_WIDTH, NEEDLE_HEIGHT);
     graphics.destroy();
 
-    // Текстура для стены
+    // Текстура для стены (вертикальная - узкая и высокая)
     this.add
       .graphics()
       .fillStyle(0xff6b6b)
@@ -74,7 +82,7 @@ class NeedleGameScene extends Phaser.Scene {
     const { width, height } = this.scale;
     const centerY = height / 2;
 
-    // Создаем иголку в центре экрана
+    // Создаем иголку в центре экрана (горизонтально)
     this.needle = this.physics.add.sprite(width * 0.2, centerY, "needle");
     this.needle.setCollideWorldBounds(true);
     this.needle.body.setSize(NEEDLE_WIDTH, NEEDLE_HEIGHT);
@@ -150,14 +158,14 @@ class NeedleGameScene extends Phaser.Scene {
     this.physics.pause();
   }
 
-  // Создание стены с зазором
+  // Создание вертикальной стены с горизонтальным зазором
   createWall(x, height) {
-    // Генерируем случайную позицию зазора
+    // Генерируем случайную позицию зазора по вертикали
     const minGapY = WALL_MIN_HEIGHT;
     const maxGapY = height - WALL_MIN_HEIGHT - GAP_SIZE;
     const gapY = minGapY + Math.random() * (maxGapY - minGapY);
 
-    // Верхняя часть стены
+    // Верхняя часть стены (вертикальная)
     const topWallHeight = gapY;
     if (topWallHeight > 20) {
       const topWall = this.walls.create(x, 0, "wall");
@@ -169,7 +177,7 @@ class NeedleGameScene extends Phaser.Scene {
       topWall.setCollideWorldBounds(false);
     }
 
-    // Нижняя часть стены
+    // Нижняя часть стены (вертикальная)
     const gapBottom = gapY + GAP_SIZE;
     const bottomWallHeight = height - gapBottom;
     if (bottomWallHeight > 20) {
@@ -197,24 +205,54 @@ class NeedleGameScene extends Phaser.Scene {
 
     const { width, height } = this.scale;
 
-    // Управление иголкой
+    // Иголка неподвижна по горизонтали (стены движутся навстречу)
+    this.needle.setVelocityX(0);
+
+    // Управление иголкой вверх/вниз с плавным ускорением для точности
+    const currentVelocityY = this.needle.body.velocity.y;
+    let targetVelocity = 0;
+    
     if (this.cursors.up.isDown || this.buttonUpPressed) {
-      this.needle.setVelocityY(-NEEDLE_SPEED);
+      targetVelocity = -NEEDLE_SPEED;
     } else if (this.cursors.down.isDown || this.buttonDownPressed) {
-      this.needle.setVelocityY(NEEDLE_SPEED);
+      targetVelocity = NEEDLE_SPEED;
+    }
+    
+    // Плавное ускорение/замедление к целевой скорости
+    if (targetVelocity !== 0) {
+      // Ускоряемся к целевой скорости
+      const acceleration = NEEDLE_ACCELERATION * (delta / 1000);
+      let newVelocityY = currentVelocityY;
+      
+      if (targetVelocity < 0) {
+        // Движение вверх
+        newVelocityY = Math.max(targetVelocity, currentVelocityY - acceleration);
+      } else {
+        // Движение вниз
+        newVelocityY = Math.min(targetVelocity, currentVelocityY + acceleration);
+      }
+      
+      this.needle.setVelocityY(newVelocityY);
     } else {
       // Плавное замедление при отпускании клавиш
-      const currentVelocityY = this.needle.body.velocity.y;
-      if (Math.abs(currentVelocityY) > 0) {
-        const deceleration = 800; // Скорость замедления
-        const newVelocityY = currentVelocityY > 0 
-          ? Math.max(0, currentVelocityY - (deceleration * delta) / 1000)
-          : Math.min(0, currentVelocityY + (deceleration * delta) / 1000);
+      if (Math.abs(currentVelocityY) > 0.1) {
+        const deceleration = NEEDLE_DECELERATION * (delta / 1000);
+        let newVelocityY = currentVelocityY;
+        
+        if (currentVelocityY > 0) {
+          newVelocityY = Math.max(0, currentVelocityY - deceleration);
+        } else {
+          newVelocityY = Math.min(0, currentVelocityY + deceleration);
+        }
+        
         this.needle.setVelocityY(newVelocityY);
+      } else {
+        // Останавливаем полностью при очень малой скорости
+        this.needle.setVelocityY(0);
       }
     }
 
-    // Ограничиваем движение иголки границами экрана
+    // Ограничиваем движение иголки границами экрана (вертикально)
     if (this.needle.y < NEEDLE_HEIGHT / 2) {
       this.needle.y = NEEDLE_HEIGHT / 2;
       this.needle.setVelocityY(0);
@@ -223,7 +261,7 @@ class NeedleGameScene extends Phaser.Scene {
       this.needle.setVelocityY(0);
     }
 
-    // Создание стен
+    // Создание стен (вертикальные стены с горизонтальными зазорами)
     this.wallSpawnTimer += delta;
     if (this.wallSpawnTimer >= WALL_SPAWN_INTERVAL) {
       this.createWall(width, height);
@@ -233,11 +271,11 @@ class NeedleGameScene extends Phaser.Scene {
     // Удаление стен за экраном и подсчет счета
     let wallPassed = false;
     this.walls.children.entries.forEach((wall) => {
-      if (wall.x + WALL_WIDTH < 0) {
+      if (wall.x + wall.displayWidth < 0) {
         // Проверяем, прошел ли игрок через стену (зазор)
         if (
-          wall.x + WALL_WIDTH < this.needle.x &&
-          wall.x + WALL_WIDTH >= this.needle.x - 10 &&
+          wall.x + wall.displayWidth < this.needle.x &&
+          wall.x + wall.displayWidth >= this.needle.x - 10 &&
           !wallPassed
         ) {
           wallPassed = true;
@@ -412,8 +450,8 @@ function GameNeedle() {
             <div className="game-menu-content">
               <h2 className="game-menu-title">Иголка</h2>
               <p style={{ color: "#666", marginBottom: "20px" }}>
-                Управляйте иголкой и пролетайте через зазоры в стенах!
-                Используйте стрелки вверх/вниз или клик/пробел для движения.
+                Управляйте иголкой вверх/вниз и пролетайте через зазоры в стенах!
+                Иголка автоматически движется вперед. Используйте стрелки вверх/вниз или кнопки.
               </p>
 
               <button className="game-menu-button" onClick={handleStart}>

@@ -15,8 +15,8 @@ const JUMP_DURATION = 250; // Длительность ускорения пры
 const OBSTACLE_SPEED = 400;
 const PLATFORM_SPAWN_INTERVAL = 3000;
 const WALL_SPAWN_INTERVAL = 6000; // Интервал появления вертикальных стен
-const PLAYER_WIDTH = 40;
-const PLAYER_HEIGHT = 60;
+const PLAYER_WIDTH = 60;
+const PLAYER_HEIGHT = 90;
 const PLATFORM_WIDTH = 150;
 const PLATFORM_HEIGHT = 15;
 const PLATFORM_MIN_DISTANCE = 200; // Минимальное расстояние между платформами
@@ -70,6 +70,103 @@ class GameScene extends Phaser.Scene {
     this.mapObstaclesCreated = false; // Флаг создания препятствий из карты
     this.mapProgress = 0; // Прогресс прохождения карты (в пикселях)
     this.spawnedObstacles = new Set(); // Множество уже созданных препятствий из карты
+    this.animationFrame = 0; // Текущий кадр анимации
+    this.animationTimer = 0; // Таймер для переключения кадров
+    this.animationSpeed = 150; // Скорость анимации (мс на кадр)
+  }
+
+  // Создание кадра анимации персонажа
+  createPlayerFrame(textureName, legOffset = 0, isJumping = false) {
+    const graphics = this.add.graphics();
+    
+    // Тело монстра - овальное, оранжевого цвета
+    graphics.fillStyle(0xff6b35); // Яркий оранжевый
+    graphics.fillEllipse(PLAYER_WIDTH / 2, PLAYER_HEIGHT / 2, PLAYER_WIDTH * 0.9, PLAYER_HEIGHT * 0.85);
+    
+    // Рога (два треугольника сверху)
+    const hornSize = 10;
+    const hornY = PLAYER_HEIGHT * 0.15;
+    const leftHornX = PLAYER_WIDTH * 0.25;
+    const rightHornX = PLAYER_WIDTH * 0.75;
+    graphics.fillStyle(0x8b4513); // Коричневый для рогов
+    // Левый рог
+    graphics.fillTriangle(
+      leftHornX, hornY,
+      leftHornX - hornSize / 2, hornY + hornSize,
+      leftHornX + hornSize / 2, hornY + hornSize
+    );
+    // Правый рог
+    graphics.fillTriangle(
+      rightHornX, hornY,
+      rightHornX - hornSize / 2, hornY + hornSize,
+      rightHornX + hornSize / 2, hornY + hornSize
+    );
+    
+    // Большие глаза (желтые с черными зрачками)
+    const eyeSize = 12;
+    const eyeY = PLAYER_HEIGHT * 0.4;
+    const leftEyeX = PLAYER_WIDTH * 0.3;
+    const rightEyeX = PLAYER_WIDTH * 0.7;
+    
+    // Белки глаз
+    graphics.fillStyle(0xffffff);
+    graphics.fillCircle(leftEyeX, eyeY, eyeSize);
+    graphics.fillCircle(rightEyeX, eyeY, eyeSize);
+    
+    // Зрачки (большие черные круги)
+    graphics.fillStyle(0x000000);
+    const pupilSize = 8;
+    graphics.fillCircle(leftEyeX, eyeY, pupilSize);
+    graphics.fillCircle(rightEyeX, eyeY, pupilSize);
+    
+    // Блики в глазах (белые точки)
+    graphics.fillStyle(0xffffff);
+    graphics.fillCircle(leftEyeX - 2, eyeY - 2, 2);
+    graphics.fillCircle(rightEyeX - 2, eyeY - 2, 2);
+    
+    // Рот с зубами (открытый рот)
+    const mouthY = PLAYER_HEIGHT * 0.7;
+    const mouthWidth = PLAYER_WIDTH * 0.5;
+    const mouthHeight = 12;
+    graphics.fillStyle(0x000000);
+    graphics.fillEllipse(PLAYER_WIDTH / 2, mouthY, mouthWidth, mouthHeight);
+    
+    // Зубы (белые треугольники)
+    graphics.fillStyle(0xffffff);
+    const toothSize = 4;
+    const toothY = mouthY - mouthHeight / 2 + 2;
+    // Верхние зубы
+    graphics.fillTriangle(
+      PLAYER_WIDTH / 2 - mouthWidth / 4, toothY,
+      PLAYER_WIDTH / 2 - mouthWidth / 4 - toothSize / 2, toothY + toothSize,
+      PLAYER_WIDTH / 2 - mouthWidth / 4 + toothSize / 2, toothY + toothSize
+    );
+    graphics.fillTriangle(
+      PLAYER_WIDTH / 2 + mouthWidth / 4, toothY,
+      PLAYER_WIDTH / 2 + mouthWidth / 4 - toothSize / 2, toothY + toothSize,
+      PLAYER_WIDTH / 2 + mouthWidth / 4 + toothSize / 2, toothY + toothSize
+    );
+    
+    // Ноги (большие овальные ступни)
+    const legWidth = 12;
+    const legHeight = isJumping ? 10 : 8;
+    const legY = PLAYER_HEIGHT - legHeight;
+    const leftLegX = PLAYER_WIDTH * 0.3 + legOffset;
+    const rightLegX = PLAYER_WIDTH * 0.7 - legOffset;
+    graphics.fillStyle(0xcc5500); // Темнее оранжевого для ног
+    graphics.fillEllipse(leftLegX, legY, legWidth, legHeight);
+    graphics.fillEllipse(rightLegX, legY, legWidth, legHeight);
+    
+    // Руки по бокам (маленькие овалы)
+    const armSize = 8;
+    const armY = PLAYER_HEIGHT * 0.55;
+    graphics.fillStyle(0xff6b35);
+    graphics.fillEllipse(armSize / 2, armY, armSize, armSize * 1.5);
+    graphics.fillEllipse(PLAYER_WIDTH - armSize / 2, armY, armSize, armSize * 1.5);
+    
+    // Генерируем текстуру
+    graphics.generateTexture(textureName, PLAYER_WIDTH, PLAYER_HEIGHT);
+    graphics.destroy();
   }
 
   init(data) {
@@ -81,12 +178,11 @@ class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    // Создаем простые цветные прямоугольники для объектов
-    this.add
-      .graphics()
-      .fillStyle(0x3390ec)
-      .fillRect(0, 0, PLAYER_WIDTH, PLAYER_HEIGHT)
-      .generateTexture("player", PLAYER_WIDTH, PLAYER_HEIGHT);
+    // Создаем несколько кадров анимации для персонажа
+    this.createPlayerFrame("player_idle", 0); // Стоящий
+    this.createPlayerFrame("player_run1", -2); // Бег кадр 1 (ноги сдвинуты влево)
+    this.createPlayerFrame("player_run2", 2); // Бег кадр 2 (ноги сдвинуты вправо)
+    this.createPlayerFrame("player_jump", 0, true); // Прыжок (вытянутые ноги)
 
     this.add
       .graphics()
@@ -122,7 +218,7 @@ class GameScene extends Phaser.Scene {
     this.player = this.physics.add.sprite(
       initialX,
       groundY - PLAYER_HEIGHT / 2,
-      "player"
+      "player_idle"
     );
     this.player.setCollideWorldBounds(false);
     this.player.body.setSize(PLAYER_WIDTH, PLAYER_HEIGHT);
@@ -389,6 +485,39 @@ class GameScene extends Phaser.Scene {
     this.chargeText.setPosition(centerX, chargeBarY);
     const percentage = Math.round(this.jumpCharge * 100);
     this.chargeText.setText(`${percentage}%`);
+  }
+
+  // Обновление анимации персонажа
+  updatePlayerAnimation(delta, isOnGround) {
+    if (!this.player) return;
+
+    const velocityY = this.player.body.velocity.y;
+    const isInAir = !isOnGround && Math.abs(velocityY) > 10;
+
+    if (isInAir) {
+      // В воздухе - показываем кадр прыжка
+      if (this.player.texture.key !== "player_jump") {
+        this.player.setTexture("player_jump");
+      }
+    } else if (isOnGround) {
+      // На земле - анимация бега
+      this.animationTimer += delta;
+      
+      if (this.animationTimer >= this.animationSpeed) {
+        this.animationTimer = 0;
+        this.animationFrame = (this.animationFrame + 1) % 2; // Переключаем между 0 и 1
+        
+        const textureName = this.animationFrame === 0 ? "player_run1" : "player_run2";
+        if (this.player.texture.key !== textureName) {
+          this.player.setTexture(textureName);
+        }
+      }
+    } else {
+      // Стоящий (idle)
+      if (this.player.texture.key !== "player_idle") {
+        this.player.setTexture("player_idle");
+      }
+    }
   }
 
   // Выполнение прыжка с заданной силой
@@ -738,6 +867,8 @@ class GameScene extends Phaser.Scene {
     this.wasPointerDown = false; // Сбрасываем предыдущее состояние мыши/тача
     this.isSpaceDown = false; // Сбрасываем флаг нажатия пробела
     this.wasSpaceDown = false; // Сбрасываем предыдущее состояние пробела
+    this.animationFrame = 0; // Сбрасываем кадр анимации
+    this.animationTimer = 0; // Сбрасываем таймер анимации
     // Сбрасываем состояние переворота
     if (this.isFlipped) {
       this.unflipPlayer();
@@ -895,6 +1026,9 @@ class GameScene extends Phaser.Scene {
 
     // Всегда обновляем визуальный индикатор (даже когда зарядка не активна, чтобы показывать 0%)
     this.updateChargeIndicator();
+
+    // Анимация персонажа
+    this.updatePlayerAnimation(delta, isOnGround);
 
     // Сохраняем текущее состояние для следующего кадра
     this.wasPointerDown = pointerIsDown;

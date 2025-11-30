@@ -12,6 +12,8 @@ const NEEDLE_HEIGHT = 15; // Ширина иголки (узкая)
 const NEEDLE_SPEED = 250; // Скорость движения иголки влево/вправо (уменьшена для точности)
 const NEEDLE_ACCELERATION = 1200; // Ускорение иголки (для плавного движения)
 const NEEDLE_DECELERATION = 1000; // Замедление иголки (для точной остановки)
+const NEEDLE_BOOST_MAX_MULTIPLIER = 2.0; // Максимальный коэффициент увеличения скорости
+const NEEDLE_BOOST_TIME_TO_MAX = 2000; // Время (мс) для достижения максимального ускорения
 const WALL_SPEED = 300; // Скорость движения стен
 const WALL_SPAWN_INTERVAL = 6000; // Интервал появления стен (мс)
 const WALL_WIDTH = 500; // Ширина стены (узкая, вертикальная)
@@ -33,6 +35,8 @@ class NeedleGameScene extends Phaser.Scene {
     this.cursors = null;
     this.buttonUpPressed = false;
     this.buttonDownPressed = false;
+    this.buttonUpHoldTime = 0; // Время удержания кнопки вверх (мс)
+    this.buttonDownHoldTime = 0; // Время удержания кнопки вниз (мс)
   }
 
   init(data) {
@@ -45,28 +49,31 @@ class NeedleGameScene extends Phaser.Scene {
   preload() {
     // Создаем текстуру иголки (горизонтальная)
     const graphics = this.add.graphics();
-    
+
     // Иголка - длинный тонкий прямоугольник с острием (горизонтальная)
     graphics.fillStyle(0x333333); // Темно-серый цвет
-    
+
     // Тело иголки (прямоугольник - горизонтальный)
     const bodyStartX = 15; // Начинаем справа от ушка
     const bodyWidth = NEEDLE_WIDTH - 15 - 8; // Ширина тела (минус ушко и острие)
     graphics.fillRect(bodyStartX, 0, bodyWidth, NEEDLE_HEIGHT);
-    
+
     // Острие иголки (треугольник справа)
     const tipX = NEEDLE_WIDTH - 8; // Позиция острия
     graphics.fillTriangle(
-      tipX, NEEDLE_HEIGHT / 2, // Вершина острия (справа)
-      NEEDLE_WIDTH, NEEDLE_HEIGHT, // Правый нижний угол
-      NEEDLE_WIDTH, 0 // Правый верхний угол
+      tipX,
+      NEEDLE_HEIGHT / 2, // Вершина острия (справа)
+      NEEDLE_WIDTH,
+      NEEDLE_HEIGHT, // Правый нижний угол
+      NEEDLE_WIDTH,
+      0 // Правый верхний угол
     );
-    
+
     // Ушко иголки (маленький круг слева)
     graphics.fillStyle(0x666666);
     const eyeRadius = 4;
     graphics.fillCircle(eyeRadius + 2, NEEDLE_HEIGHT / 2, eyeRadius);
-    
+
     graphics.generateTexture("needle", NEEDLE_WIDTH, NEEDLE_HEIGHT);
     graphics.destroy();
 
@@ -92,13 +99,7 @@ class NeedleGameScene extends Phaser.Scene {
     this.walls = this.physics.add.group();
 
     // Физика столкновений
-    this.physics.add.overlap(
-      this.needle,
-      this.walls,
-      this.hitWall,
-      null,
-      this
-    );
+    this.physics.add.overlap(this.needle, this.walls, this.hitWall, null, this);
 
     // Управление
     this.cursors = this.input.keyboard.createCursorKeys();
@@ -113,11 +114,16 @@ class NeedleGameScene extends Phaser.Scene {
     });
 
     // Инструкция
-    this.instructionText = this.add.text(width / 2, height - 50, "Стрелки вверх/вниз или клик/пробел", {
-      fontSize: "18px",
-      fill: "#666",
-      fontFamily: "Arial",
-    });
+    this.instructionText = this.add.text(
+      width / 2,
+      height - 50,
+      "Стрелки вверх/вниз или клик/пробел",
+      {
+        fontSize: "18px",
+        fill: "#666",
+        fontFamily: "Arial",
+      }
+    );
     this.instructionText.setOrigin(0.5, 0.5);
   }
 
@@ -140,16 +146,18 @@ class NeedleGameScene extends Phaser.Scene {
   stopMovingUp() {
     if (!this.isGameActive) return;
     this.buttonUpPressed = false;
+    this.buttonUpHoldTime = 0; // Сбрасываем время удержания
   }
 
   stopMovingDown() {
     if (!this.isGameActive) return;
     this.buttonDownPressed = false;
+    this.buttonDownHoldTime = 0; // Сбрасываем время удержания
   }
 
   hitWall() {
     if (!this.isGameActive) return;
-    
+
     console.log("Hit wall! Game over!");
     this.isGameActive = false;
     if (this.onGameOver) {
@@ -198,6 +206,8 @@ class NeedleGameScene extends Phaser.Scene {
     this.isGameActive = true;
     this.buttonUpPressed = false;
     this.buttonDownPressed = false;
+    this.buttonUpHoldTime = 0;
+    this.buttonDownHoldTime = 0;
   }
 
   update(time, delta) {
@@ -211,40 +221,75 @@ class NeedleGameScene extends Phaser.Scene {
     // Управление иголкой вверх/вниз с плавным ускорением для точности
     const currentVelocityY = this.needle.body.velocity.y;
     let targetVelocity = 0;
-    
-    if (this.cursors.up.isDown || this.buttonUpPressed) {
-      targetVelocity = -NEEDLE_SPEED;
-    } else if (this.cursors.down.isDown || this.buttonDownPressed) {
-      targetVelocity = NEEDLE_SPEED;
+
+    // Обновляем время удержания кнопок и рассчитываем множитель ускорения
+    if (this.buttonUpPressed) {
+      this.buttonUpHoldTime += delta; // Увеличиваем время удержания
+    } else {
+      this.buttonUpHoldTime = 0; // Сбрасываем, если кнопка не нажата
     }
-    
+
+    if (this.buttonDownPressed) {
+      this.buttonDownHoldTime += delta; // Увеличиваем время удержания
+    } else {
+      this.buttonDownHoldTime = 0; // Сбрасываем, если кнопка не нажата
+    }
+
+    // Рассчитываем текущий множитель ускорения на основе времени удержания
+    const getBoostMultiplier = (holdTime) => {
+      if (holdTime <= 0) return 1;
+      // Прогрессивное увеличение от 1 до NEEDLE_BOOST_MAX_MULTIPLIER
+      const progress = Math.min(holdTime / NEEDLE_BOOST_TIME_TO_MAX, 1);
+      return 1 + (NEEDLE_BOOST_MAX_MULTIPLIER - 1) * progress;
+    };
+
+    if (this.cursors.up.isDown || this.buttonUpPressed) {
+      // Применяем прогрессивный коэффициент ускорения для кнопки на экране
+      const speedMultiplier = this.buttonUpPressed
+        ? getBoostMultiplier(this.buttonUpHoldTime)
+        : 1;
+      targetVelocity = -NEEDLE_SPEED * speedMultiplier;
+    } else if (this.cursors.down.isDown || this.buttonDownPressed) {
+      // Применяем прогрессивный коэффициент ускорения для кнопки на экране
+      const speedMultiplier = this.buttonDownPressed
+        ? getBoostMultiplier(this.buttonDownHoldTime)
+        : 1;
+      targetVelocity = NEEDLE_SPEED * speedMultiplier;
+    }
+
     // Плавное ускорение/замедление к целевой скорости
     if (targetVelocity !== 0) {
       // Ускоряемся к целевой скорости
       const acceleration = NEEDLE_ACCELERATION * (delta / 1000);
       let newVelocityY = currentVelocityY;
-      
+
       if (targetVelocity < 0) {
         // Движение вверх
-        newVelocityY = Math.max(targetVelocity, currentVelocityY - acceleration);
+        newVelocityY = Math.max(
+          targetVelocity,
+          currentVelocityY - acceleration
+        );
       } else {
         // Движение вниз
-        newVelocityY = Math.min(targetVelocity, currentVelocityY + acceleration);
+        newVelocityY = Math.min(
+          targetVelocity,
+          currentVelocityY + acceleration
+        );
       }
-      
+
       this.needle.setVelocityY(newVelocityY);
     } else {
       // Плавное замедление при отпускании клавиш
       if (Math.abs(currentVelocityY) > 0.1) {
         const deceleration = NEEDLE_DECELERATION * (delta / 1000);
         let newVelocityY = currentVelocityY;
-        
+
         if (currentVelocityY > 0) {
           newVelocityY = Math.max(0, currentVelocityY - deceleration);
         } else {
           newVelocityY = Math.min(0, currentVelocityY + deceleration);
         }
-        
+
         this.needle.setVelocityY(newVelocityY);
       } else {
         // Останавливаем полностью при очень малой скорости
@@ -396,7 +441,8 @@ function GameNeedle() {
         scene.scene.restart();
 
         setTimeout(() => {
-          const newScene = phaserGameRef.current?.scene.getScene("NeedleGameScene");
+          const newScene =
+            phaserGameRef.current?.scene.getScene("NeedleGameScene");
           if (newScene) {
             newScene.onScoreUpdate = setScore;
             newScene.onGameOver = () => setIsGameOver(true);
@@ -450,8 +496,9 @@ function GameNeedle() {
             <div className="game-menu-content">
               <h2 className="game-menu-title">Иголка</h2>
               <p style={{ color: "#666", marginBottom: "20px" }}>
-                Управляйте иголкой вверх/вниз и пролетайте через зазоры в стенах!
-                Иголка автоматически движется вперед. Используйте стрелки вверх/вниз или кнопки.
+                Управляйте иголкой вверх/вниз и пролетайте через зазоры в
+                стенах! Иголка автоматически движется вперед. Используйте
+                стрелки вверх/вниз или кнопки.
               </p>
 
               <button className="game-menu-button" onClick={handleStart}>
@@ -460,7 +507,13 @@ function GameNeedle() {
             </div>
           </div>
         ) : (
-          <div style={{ position: "relative", width: "100%", height: "100%" }}>
+          <div
+            style={{ position: "relative", width: "100%", height: "100%" }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              return false;
+            }}
+          >
             <div
               ref={gameRef}
               style={{
@@ -486,31 +539,40 @@ function GameNeedle() {
                 }}
               >
                 <button
-                  onMouseDown={() => {
+                  onMouseDown={(e) => {
+                    e.preventDefault();
                     setIsUpPressed(true);
-                    const scene = phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
                     if (scene && scene.moveUpButton) {
                       scene.moveUpButton();
                     }
                   }}
                   onMouseUp={() => {
                     setIsUpPressed(false);
-                    const scene = phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
                     if (scene && scene.stopMovingUpButton) {
                       scene.stopMovingUpButton();
                     }
                   }}
                   onMouseLeave={() => {
                     setIsUpPressed(false);
-                    const scene = phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
                     if (scene && scene.stopMovingUpButton) {
                       scene.stopMovingUpButton();
                     }
                   }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    return false;
+                  }}
                   onTouchStart={(e) => {
                     e.preventDefault();
                     setIsUpPressed(true);
-                    const scene = phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
                     if (scene && scene.moveUpButton) {
                       scene.moveUpButton();
                     }
@@ -518,7 +580,8 @@ function GameNeedle() {
                   onTouchEnd={(e) => {
                     e.preventDefault();
                     setIsUpPressed(false);
-                    const scene = phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
                     if (scene && scene.stopMovingUpButton) {
                       scene.stopMovingUpButton();
                     }
@@ -538,36 +601,49 @@ function GameNeedle() {
                     boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
                     transition: "background-color 0.1s",
                     userSelect: "none",
+                    outline: "none",
+                    WebkitTapHighlightColor: "transparent",
+                    touchAction: "manipulation",
                   }}
+                  onFocus={(e) => e.target.blur()}
                 >
                   ↑
                 </button>
                 <button
-                  onMouseDown={() => {
+                  onMouseDown={(e) => {
+                    e.preventDefault();
                     setIsDownPressed(true);
-                    const scene = phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
                     if (scene && scene.moveDownButton) {
                       scene.moveDownButton();
                     }
                   }}
                   onMouseUp={() => {
                     setIsDownPressed(false);
-                    const scene = phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
                     if (scene && scene.stopMovingDownButton) {
                       scene.stopMovingDownButton();
                     }
                   }}
                   onMouseLeave={() => {
                     setIsDownPressed(false);
-                    const scene = phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
                     if (scene && scene.stopMovingDownButton) {
                       scene.stopMovingDownButton();
                     }
                   }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    return false;
+                  }}
                   onTouchStart={(e) => {
                     e.preventDefault();
                     setIsDownPressed(true);
-                    const scene = phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
                     if (scene && scene.moveDownButton) {
                       scene.moveDownButton();
                     }
@@ -575,7 +651,8 @@ function GameNeedle() {
                   onTouchEnd={(e) => {
                     e.preventDefault();
                     setIsDownPressed(false);
-                    const scene = phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
                     if (scene && scene.stopMovingDownButton) {
                       scene.stopMovingDownButton();
                     }
@@ -595,7 +672,11 @@ function GameNeedle() {
                     boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
                     transition: "background-color 0.1s",
                     userSelect: "none",
+                    outline: "none",
+                    WebkitTapHighlightColor: "transparent",
+                    touchAction: "manipulation",
                   }}
+                  onFocus={(e) => e.target.blur()}
                 >
                   ↓
                 </button>
@@ -649,4 +730,3 @@ function GameNeedle() {
 }
 
 export default GameNeedle;
-

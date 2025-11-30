@@ -47,6 +47,10 @@ class GameScene extends Phaser.Scene {
     this.maxJumps = 3; // Максимальное количество прыжков
     this.jumpAccelerationTimer = 0; // Таймер ускорения прыжка
     this.isJumpAccelerating = false; // Флаг активного ускорения прыжка
+    this.isChargingJump = false; // Флаг зарядки первого прыжка
+    this.jumpCharge = 0; // Накопленная сила прыжка (0-1)
+    this.maxJumpChargeTime = 1000; // Максимальное время зарядки в миллисекундах
+    this.chargeTimer = 0; // Таймер зарядки
     this.isFlipped = false; // Флаг переворота персонажа
     this.flipTimer = 0; // Таймер для возврата из перевернутого состояния
     this.boostTimer = 0; // Таймер ускорения при перевороте
@@ -177,8 +181,19 @@ class GameScene extends Phaser.Scene {
     });
 
     // Управление
-    this.input.keyboard.on("keydown-SPACE", this.jump, this);
-    this.input.on("pointerdown", this.jump, this);
+    this.input.keyboard.on("keydown-SPACE", this.startJump, this);
+    this.input.keyboard.on("keyup-SPACE", this.endJump, this);
+    this.input.on("pointerdown", this.startJump, this);
+    this.input.on("pointerup", this.endJump, this);
+    
+    // Сохраняем ссылку на клавишу пробела для проверки состояния
+    this.spaceKey = this.input.keyboard.addKey('SPACE');
+    
+    // Флаги для отслеживания состояния кнопок
+    this.isPointerDown = false;
+    this.wasPointerDown = false;
+    this.isSpaceDown = false;
+    this.wasSpaceDown = false;
 
     // Проверяем наличие сохраненной карты в localStorage
     try {
@@ -284,7 +299,22 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  jump() {
+  // Начало прыжка (нажатие клавиши/клик)
+  startJump() {
+    if (!this.isGameActive) return;
+    this.isPointerDown = true;
+    this.isSpaceDown = true;
+  }
+
+  // Окончание прыжка (отпускание клавиши/клика)
+  endJump() {
+    if (!this.isGameActive) return;
+    this.isPointerDown = false;
+    this.isSpaceDown = false;
+  }
+
+  // Выполнение прыжка с заданной силой
+  jump(jumpStrength = JUMP_STRENGTH) {
     if (!this.isGameActive) return;
 
     // Проверяем, стоит ли персонаж на земле или платформе
@@ -298,8 +328,8 @@ class GameScene extends Phaser.Scene {
 
     // Разрешаем прыжок, если еще не использовали все доступные прыжки
     if (this.jumpCount < this.maxJumps) {
-      // Устанавливаем начальную скорость прыжка
-      this.player.setVelocityY(JUMP_STRENGTH);
+      // Устанавливаем начальную скорость прыжка с учетом силы
+      this.player.setVelocityY(jumpStrength);
       // Добавляем движение вперед при прыжке
       const currentVelocityX = this.player.body.velocity.x;
       this.player.setVelocityX(currentVelocityX + JUMP_FORWARD_SPEED);
@@ -623,6 +653,13 @@ class GameScene extends Phaser.Scene {
     this.jumpCount = 0; // Сбрасываем счетчик прыжков
     this.isJumpAccelerating = false; // Сбрасываем флаг ускорения прыжка
     this.jumpAccelerationTimer = 0; // Сбрасываем таймер ускорения прыжка
+    this.isChargingJump = false; // Сбрасываем флаг зарядки прыжка
+    this.jumpCharge = 0; // Сбрасываем накопленную силу
+    this.chargeTimer = 0; // Сбрасываем таймер зарядки
+    this.isPointerDown = false; // Сбрасываем флаг нажатия мыши/тача
+    this.wasPointerDown = false; // Сбрасываем предыдущее состояние мыши/тача
+    this.isSpaceDown = false; // Сбрасываем флаг нажатия пробела
+    this.wasSpaceDown = false; // Сбрасываем предыдущее состояние пробела
     // Сбрасываем состояние переворота
     if (this.isFlipped) {
       this.unflipPlayer();
@@ -721,6 +758,66 @@ class GameScene extends Phaser.Scene {
 
     // Минимальное время между генерацией платформы и стены (мс)
     const minTimeBetweenSpawns = 500;
+
+    // Отслеживаем состояние кнопок мыши/тача
+    const pointerIsDown = this.input.activePointer.isDown;
+    const spaceIsDown = this.spaceKey && this.spaceKey.isDown;
+    
+    // Проверяем, стоит ли персонаж на земле или платформе
+    const isOnGround =
+      this.player.body.touching.down || this.player.body.onFloor();
+
+    // Если на земле, сбрасываем счетчик прыжков
+    if (isOnGround) {
+      this.jumpCount = 0;
+    }
+
+    // Определяем, нажата ли кнопка прыжка (мышь/тач или пробел)
+    const jumpButtonDown = pointerIsDown || spaceIsDown;
+    const jumpButtonJustPressed = jumpButtonDown && (!this.wasPointerDown && !this.wasSpaceDown);
+
+    // Обработка начала зарядки (когда кнопка только что нажата)
+    if (jumpButtonJustPressed) {
+      if (isOnGround && this.jumpCount === 0) {
+        // Для первого прыжка (когда на земле) начинаем зарядку
+        this.isChargingJump = true;
+        this.jumpCharge = 0;
+        this.chargeTimer = 0;
+      } else {
+        // Для дополнительных прыжков сразу выполняем прыжок
+        this.jump(JUMP_STRENGTH);
+      }
+    }
+
+    // Обработка зарядки первого прыжка
+    if (this.isChargingJump) {
+      if (!isOnGround) {
+        // Персонаж оторвался от земли - отменяем зарядку и выполняем прыжок с минимальной силой
+        this.jump(JUMP_STRENGTH);
+        this.isChargingJump = false;
+        this.jumpCharge = 0;
+        this.chargeTimer = 0;
+      } else if (jumpButtonDown) {
+        // Кнопка все еще нажата - продолжаем зарядку
+        this.chargeTimer += delta;
+        // Накопление силы от 0 до 1 за время maxJumpChargeTime
+        this.jumpCharge = Math.min(1, this.chargeTimer / this.maxJumpChargeTime);
+      } else {
+        // Кнопка отпущена - выполняем прыжок с накопленной силой
+        const minJumpStrength = JUMP_STRENGTH;
+        const maxJumpStrength = JUMP_STRENGTH * 2;
+        const jumpStrength = minJumpStrength + (maxJumpStrength - minJumpStrength) * this.jumpCharge;
+        
+        this.jump(jumpStrength);
+        this.isChargingJump = false;
+        this.jumpCharge = 0;
+        this.chargeTimer = 0;
+      }
+    }
+
+    // Сохраняем текущее состояние для следующего кадра
+    this.wasPointerDown = pointerIsDown;
+    this.wasSpaceDown = spaceIsDown;
 
     // Обработка ускорения прыжка (контроль скорости набора высоты)
     // Используем прямое изменение скорости вместо ускорения для лучшего контроля

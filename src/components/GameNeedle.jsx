@@ -586,6 +586,15 @@ function GameNeedle() {
                       scene.stopMovingUpButton();
                     }
                   }}
+                  onTouchCancel={(e) => {
+                    e.preventDefault();
+                    setIsUpPressed(false);
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    if (scene && scene.stopMovingUpButton) {
+                      scene.stopMovingUpButton();
+                    }
+                  }}
                   style={{
                     width: "60px",
                     height: "60px",
@@ -601,13 +610,31 @@ function GameNeedle() {
                     boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
                     transition: "background-color 0.1s",
                     userSelect: "none",
+                    WebkitUserSelect: "none",
+                    MozUserSelect: "none",
+                    msUserSelect: "none",
                     outline: "none",
                     WebkitTapHighlightColor: "transparent",
+                    WebkitTouchCallout: "none",
                     touchAction: "manipulation",
+                    pointerEvents: "auto",
+                    WebkitAppearance: "none",
+                    appearance: "none",
                   }}
                   onFocus={(e) => e.target.blur()}
                 >
-                  ↑
+                  <span
+                    style={{
+                      userSelect: "none",
+                      WebkitUserSelect: "none",
+                      MozUserSelect: "none",
+                      msUserSelect: "none",
+                      WebkitTouchCallout: "none",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    ↑
+                  </span>
                 </button>
                 <button
                   onMouseDown={(e) => {
@@ -657,6 +684,15 @@ function GameNeedle() {
                       scene.stopMovingDownButton();
                     }
                   }}
+                  onTouchCancel={(e) => {
+                    e.preventDefault();
+                    setIsDownPressed(false);
+                    const scene =
+                      phaserGameRef.current?.scene.getScene("NeedleGameScene");
+                    if (scene && scene.stopMovingDownButton) {
+                      scene.stopMovingDownButton();
+                    }
+                  }}
                   style={{
                     width: "60px",
                     height: "60px",
@@ -672,13 +708,31 @@ function GameNeedle() {
                     boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
                     transition: "background-color 0.1s",
                     userSelect: "none",
+                    WebkitUserSelect: "none",
+                    MozUserSelect: "none",
+                    msUserSelect: "none",
                     outline: "none",
                     WebkitTapHighlightColor: "transparent",
+                    WebkitTouchCallout: "none",
                     touchAction: "manipulation",
+                    pointerEvents: "auto",
+                    WebkitAppearance: "none",
+                    appearance: "none",
                   }}
                   onFocus={(e) => e.target.blur()}
                 >
-                  ↓
+                  <span
+                    style={{
+                      userSelect: "none",
+                      WebkitUserSelect: "none",
+                      MozUserSelect: "none",
+                      msUserSelect: "none",
+                      WebkitTouchCallout: "none",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    ↓
+                  </span>
                 </button>
               </div>
             )}

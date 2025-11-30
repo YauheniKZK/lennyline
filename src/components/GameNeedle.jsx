@@ -7,13 +7,13 @@ import packageJson from "../../package.json";
 const APP_VERSION = packageJson.version;
 
 // Константы игры
-const NEEDLE_WIDTH = 80; // Длина иголки (горизонтальная)
-const NEEDLE_HEIGHT = 15; // Ширина иголки (узкая)
+const NEEDLE_WIDTH = 160; // Длина иголки (горизонтальная)
+const NEEDLE_HEIGHT = 5; // Ширина иголки (узкая)
 const NEEDLE_SPEED = 250; // Скорость движения иголки влево/вправо (уменьшена для точности)
 const NEEDLE_ACCELERATION = 1200; // Ускорение иголки (для плавного движения)
 const NEEDLE_DECELERATION = 1000; // Замедление иголки (для точной остановки)
-const NEEDLE_BOOST_MAX_MULTIPLIER = 2.0; // Максимальный коэффициент увеличения скорости
-const NEEDLE_BOOST_TIME_TO_MAX = 2000; // Время (мс) для достижения максимального ускорения
+const NEEDLE_BOOST_MAX_MULTIPLIER = 3.0; // Максимальный коэффициент увеличения скорости
+const NEEDLE_BOOST_TIME_TO_MAX = 1000; // Время (мс) для достижения максимального ускорения
 const WALL_SPEED = 300; // Скорость движения стен
 const WALL_SPAWN_INTERVAL = 6000; // Интервал появления стен (мс)
 const WALL_WIDTH = 500; // Ширина стены (узкая, вертикальная)
@@ -50,29 +50,24 @@ class NeedleGameScene extends Phaser.Scene {
     // Создаем текстуру иголки (горизонтальная)
     const graphics = this.add.graphics();
 
-    // Иголка - длинный тонкий прямоугольник с острием (горизонтальная)
+    // Иголка - длинный тонкий прямоугольник с острием на правом конце
     graphics.fillStyle(0x333333); // Темно-серый цвет
 
-    // Тело иголки (прямоугольник - горизонтальный)
-    const bodyStartX = 15; // Начинаем справа от ушка
-    const bodyWidth = NEEDLE_WIDTH - 15 - 8; // Ширина тела (минус ушко и острие)
-    graphics.fillRect(bodyStartX, 0, bodyWidth, NEEDLE_HEIGHT);
+    // Тело иголки (длинный тонкий прямоугольник - горизонтальный)
+    const tipWidth = 8; // Ширина острия
+    const bodyWidth = NEEDLE_WIDTH - tipWidth; // Ширина тела (минус острие)
+    graphics.fillRect(0, 0, bodyWidth, NEEDLE_HEIGHT);
 
-    // Острие иголки (треугольник справа)
-    const tipX = NEEDLE_WIDTH - 8; // Позиция острия
+    // Острие иголки (треугольник на правом конце)
+    const tipX = NEEDLE_WIDTH - tipWidth; // Позиция начала острия
     graphics.fillTriangle(
+      NEEDLE_WIDTH,
+      NEEDLE_HEIGHT / 2, // Вершина острия (справа, центр)
       tipX,
-      NEEDLE_HEIGHT / 2, // Вершина острия (справа)
-      NEEDLE_WIDTH,
-      NEEDLE_HEIGHT, // Правый нижний угол
-      NEEDLE_WIDTH,
-      0 // Правый верхний угол
+      NEEDLE_HEIGHT, // Левый нижний угол острия
+      tipX,
+      0 // Левый верхний угол острия
     );
-
-    // Ушко иголки (маленький круг слева)
-    graphics.fillStyle(0x666666);
-    const eyeRadius = 4;
-    graphics.fillCircle(eyeRadius + 2, NEEDLE_HEIGHT / 2, eyeRadius);
 
     graphics.generateTexture("needle", NEEDLE_WIDTH, NEEDLE_HEIGHT);
     graphics.destroy();

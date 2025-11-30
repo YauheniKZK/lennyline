@@ -1433,7 +1433,7 @@ function GameRunner() {
     if (!isGameStarted || !gameRef.current) return;
 
     // Увеличиваем размеры canvas для большего видимого пространства
-    const scaleFactor = 1.8; // Коэффициент увеличения (20% больше)
+    const scaleFactor = 2.8; // Коэффициент увеличения (20% больше)
     const gameWidth = gameRef.current.clientWidth * scaleFactor;
     const gameHeight = gameRef.current.clientHeight * scaleFactor;
 

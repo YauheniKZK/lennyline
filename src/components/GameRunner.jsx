@@ -8,11 +8,11 @@ import MapGenerator from "./MapGenerator";
 const APP_VERSION = packageJson.version;
 
 // Константы игры
-const GRAVITY = 800; // Уменьшена гравитация для более высоких прыжков
+const GRAVITY = 1200; // Уменьшена гравитация для более высоких прыжков
 const JUMP_STRENGTH = -400; // Начальная скорость прыжка (высота подъема)
-const JUMP_ACCELERATION = -2500; // Ускорение прыжка (скорость набора высоты) - чем больше абсолютное значение, тем быстрее подъем
-const JUMP_DURATION = 250; // Длительность ускорения прыжка в миллисекундах (чем больше, тем дольше ускорение)
-const OBSTACLE_SPEED = 400;
+const JUMP_ACCELERATION = -5500; // Ускорение прыжка (скорость набора высоты) - чем больше абсолютное значение, тем быстрее подъем
+const JUMP_DURATION = 300; // Длительность ускорения прыжка в миллисекундах (чем больше, тем дольше ускорение)
+const OBSTACLE_SPEED = 1000;
 const PLATFORM_SPAWN_INTERVAL = 3000;
 const WALL_SPAWN_INTERVAL = 6000; // Интервал появления вертикальных стен
 const PLAYER_WIDTH = 60;

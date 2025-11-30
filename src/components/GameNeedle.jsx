@@ -10,10 +10,13 @@ const APP_VERSION = packageJson.version;
 const NEEDLE_WIDTH = 160; // Длина иголки (горизонтальная)
 const NEEDLE_HEIGHT = 4; // Ширина иголки (узкая)
 const NEEDLE_SPEED = 250; // Скорость движения иголки влево/вправо (уменьшена для точности)
+const NEEDLE_PRECISE_SPEED = 120; // Скорость для точных движений при коротких нажатиях
 const NEEDLE_ACCELERATION = 1200; // Ускорение иголки (для плавного движения)
 const NEEDLE_DECELERATION = 1000; // Замедление иголки (для точной остановки)
 const NEEDLE_BOOST_MAX_MULTIPLIER = 3.0; // Максимальный коэффициент увеличения скорости
 const NEEDLE_BOOST_TIME_TO_MAX = 1000; // Время (мс) для достижения максимального ускорения
+const PRECISE_TAP_THRESHOLD = 150; // Порог времени (мс) для определения короткого нажатия (тапа)
+const PRECISE_TAP_COOLDOWN = 50; // Время (мс) после тапа, в течение которого используется точная скорость
 const WALL_SPEED = 200; // Скорость движения стен
 const WALL_SPAWN_INTERVAL = 6000; // Интервал появления стен (мс)
 const WALL_WIDTH = 500; // Ширина стены (узкая, вертикальная)
@@ -41,6 +44,11 @@ class NeedleGameScene extends Phaser.Scene {
     this.gapHintGraphics = null; // Графические элементы подсказок
     this.wallIdCounter = 0; // Счетчик для уникальных ID стен
     this.passedWalls = new Set(); // Множество пройденных стен
+    this.lastUpPressTime = 0; // Время последнего нажатия вверх
+    this.lastDownPressTime = 0; // Время последнего нажатия вниз
+    this.lastUpReleaseTime = 0; // Время последнего отпускания вверх
+    this.lastDownReleaseTime = 0; // Время последнего отпускания вниз
+    this.preciseModeTimer = 0; // Таймер для режима точного управления
   }
 
   init(data) {
@@ -102,8 +110,12 @@ class NeedleGameScene extends Phaser.Scene {
 
     // Управление
     this.cursors = this.input.keyboard.createCursorKeys();
-    this.input.keyboard.on("keydown-SPACE", this.moveUp, this);
-    this.input.on("pointerdown", this.moveUp, this);
+    this.input.keyboard.on("keydown-SPACE", () => this.moveUp(), this);
+    this.input.on("pointerdown", () => this.moveUp(), this);
+
+    // Отслеживание нажатий клавиш для определения коротких нажатий
+    this.wasUpPressed = false;
+    this.wasDownPressed = false;
 
     // Текст счета
     this.scoreText = this.add.text(20, 20, "Пройдено стен: 0", {
@@ -132,13 +144,39 @@ class NeedleGameScene extends Phaser.Scene {
     this.generateNextGap(height);
   }
 
-  moveUp() {
+  moveUp(time) {
     if (!this.isGameActive) return;
+    const currentTime = time || this.time.now;
+
+    // Определяем, было ли это короткое нажатие (тап)
+    const timeSinceRelease = currentTime - this.lastUpReleaseTime;
+    const wasQuickTap =
+      timeSinceRelease < PRECISE_TAP_THRESHOLD && this.lastUpReleaseTime > 0;
+
+    if (wasQuickTap) {
+      // Включаем режим точного управления после короткого нажатия
+      this.preciseModeTimer = PRECISE_TAP_COOLDOWN;
+    }
+
+    this.lastUpPressTime = currentTime;
     this.buttonUpPressed = true;
   }
 
-  moveDown() {
+  moveDown(time) {
     if (!this.isGameActive) return;
+    const currentTime = time || this.time.now;
+
+    // Определяем, было ли это короткое нажатие (тап)
+    const timeSinceRelease = currentTime - this.lastDownReleaseTime;
+    const wasQuickTap =
+      timeSinceRelease < PRECISE_TAP_THRESHOLD && this.lastDownReleaseTime > 0;
+
+    if (wasQuickTap) {
+      // Включаем режим точного управления после короткого нажатия
+      this.preciseModeTimer = PRECISE_TAP_COOLDOWN;
+    }
+
+    this.lastDownPressTime = currentTime;
     this.buttonDownPressed = true;
   }
 
@@ -148,14 +186,34 @@ class NeedleGameScene extends Phaser.Scene {
     this.buttonDownPressed = false;
   }
 
-  stopMovingUp() {
+  stopMovingUp(time) {
     if (!this.isGameActive) return;
+    const currentTime = time || this.time.now;
+    const holdDuration = currentTime - this.lastUpPressTime;
+
+    // Если нажатие было коротким, сохраняем время отпускания
+    if (holdDuration < PRECISE_TAP_THRESHOLD) {
+      this.lastUpReleaseTime = currentTime;
+    } else {
+      this.lastUpReleaseTime = 0; // Сбрасываем, если было длинное нажатие
+    }
+
     this.buttonUpPressed = false;
     this.buttonUpHoldTime = 0; // Сбрасываем время удержания
   }
 
-  stopMovingDown() {
+  stopMovingDown(time) {
     if (!this.isGameActive) return;
+    const currentTime = time || this.time.now;
+    const holdDuration = currentTime - this.lastDownPressTime;
+
+    // Если нажатие было коротким, сохраняем время отпускания
+    if (holdDuration < PRECISE_TAP_THRESHOLD) {
+      this.lastDownReleaseTime = currentTime;
+    } else {
+      this.lastDownReleaseTime = 0; // Сбрасываем, если было длинное нажатие
+    }
+
     this.buttonDownPressed = false;
     this.buttonDownHoldTime = 0; // Сбрасываем время удержания
   }
@@ -292,6 +350,13 @@ class NeedleGameScene extends Phaser.Scene {
     this.buttonDownHoldTime = 0;
     this.wallIdCounter = 0;
     this.passedWalls.clear();
+    this.lastUpPressTime = 0;
+    this.lastDownPressTime = 0;
+    this.lastUpReleaseTime = 0;
+    this.lastDownReleaseTime = 0;
+    this.preciseModeTimer = 0;
+    this.wasUpPressed = false;
+    this.wasDownPressed = false;
     if (this.gapHintGraphics) {
       this.gapHintGraphics.clear();
     }
@@ -304,6 +369,14 @@ class NeedleGameScene extends Phaser.Scene {
 
     // Иголка неподвижна по горизонтали (стены движутся навстречу)
     this.needle.setVelocityX(0);
+
+    // Обновляем таймер режима точного управления
+    if (this.preciseModeTimer > 0) {
+      this.preciseModeTimer -= delta;
+      if (this.preciseModeTimer < 0) {
+        this.preciseModeTimer = 0;
+      }
+    }
 
     // Управление иголкой вверх/вниз с плавным ускорением для точности
     const currentVelocityY = this.needle.body.velocity.y;
@@ -322,26 +395,83 @@ class NeedleGameScene extends Phaser.Scene {
       this.buttonDownHoldTime = 0; // Сбрасываем, если кнопка не нажата
     }
 
+    // Определяем, находимся ли в режиме точного управления
+    const isPreciseMode =
+      this.preciseModeTimer > 0 ||
+      (this.buttonUpPressed && this.buttonUpHoldTime < PRECISE_TAP_THRESHOLD) ||
+      (this.buttonDownPressed &&
+        this.buttonDownHoldTime < PRECISE_TAP_THRESHOLD);
+
+    // Базовая скорость зависит от режима
+    const baseSpeed = isPreciseMode ? NEEDLE_PRECISE_SPEED : NEEDLE_SPEED;
+
     // Рассчитываем текущий множитель ускорения на основе времени удержания
     const getBoostMultiplier = (holdTime) => {
       if (holdTime <= 0) return 1;
+      // В режиме точного управления не используем ускорение
+      if (isPreciseMode) return 1;
       // Прогрессивное увеличение от 1 до NEEDLE_BOOST_MAX_MULTIPLIER
       const progress = Math.min(holdTime / NEEDLE_BOOST_TIME_TO_MAX, 1);
       return 1 + (NEEDLE_BOOST_MAX_MULTIPLIER - 1) * progress;
     };
+
+    // Отслеживание коротких нажатий на клавиатуре
+    if (this.cursors.up.isDown && !this.wasUpPressed) {
+      // Только что нажали вверх
+      if (
+        this.lastUpReleaseTime > 0 &&
+        time - this.lastUpReleaseTime < PRECISE_TAP_THRESHOLD
+      ) {
+        // Быстрое повторное нажатие - режим точного управления
+        this.preciseModeTimer = PRECISE_TAP_COOLDOWN;
+      }
+      this.lastUpPressTime = time;
+      this.wasUpPressed = true;
+    } else if (!this.cursors.up.isDown && this.wasUpPressed) {
+      // Только что отпустили вверх
+      const holdDuration = time - this.lastUpPressTime;
+      if (holdDuration < PRECISE_TAP_THRESHOLD && this.lastUpPressTime > 0) {
+        this.lastUpReleaseTime = time;
+      } else {
+        this.lastUpReleaseTime = 0;
+      }
+      this.wasUpPressed = false;
+    }
+
+    if (this.cursors.down.isDown && !this.wasDownPressed) {
+      // Только что нажали вниз
+      if (
+        this.lastDownReleaseTime > 0 &&
+        time - this.lastDownReleaseTime < PRECISE_TAP_THRESHOLD
+      ) {
+        // Быстрое повторное нажатие - режим точного управления
+        this.preciseModeTimer = PRECISE_TAP_COOLDOWN;
+      }
+      this.lastDownPressTime = time;
+      this.wasDownPressed = true;
+    } else if (!this.cursors.down.isDown && this.wasDownPressed) {
+      // Только что отпустили вниз
+      const holdDuration = time - this.lastDownPressTime;
+      if (holdDuration < PRECISE_TAP_THRESHOLD && this.lastDownPressTime > 0) {
+        this.lastDownReleaseTime = time;
+      } else {
+        this.lastDownReleaseTime = 0;
+      }
+      this.wasDownPressed = false;
+    }
 
     if (this.cursors.up.isDown || this.buttonUpPressed) {
       // Применяем прогрессивный коэффициент ускорения для кнопки на экране
       const speedMultiplier = this.buttonUpPressed
         ? getBoostMultiplier(this.buttonUpHoldTime)
         : 1;
-      targetVelocity = -NEEDLE_SPEED * speedMultiplier;
+      targetVelocity = -baseSpeed * speedMultiplier;
     } else if (this.cursors.down.isDown || this.buttonDownPressed) {
       // Применяем прогрессивный коэффициент ускорения для кнопки на экране
       const speedMultiplier = this.buttonDownPressed
         ? getBoostMultiplier(this.buttonDownHoldTime)
         : 1;
-      targetVelocity = NEEDLE_SPEED * speedMultiplier;
+      targetVelocity = baseSpeed * speedMultiplier;
     }
 
     // Плавное ускорение/замедление к целевой скорости

@@ -180,6 +180,51 @@ class GameScene extends Phaser.Scene {
       fontFamily: "Arial",
     });
 
+    // Визуальный индикатор силы прыжка
+    const chargeBarWidth = 200;
+    const chargeBarHeight = 20;
+    const chargeBarX = width / 2 - chargeBarWidth / 2;
+    const chargeBarY = height - 100;
+
+    // Фон полосы прогресса
+    this.chargeBarBg = this.add.rectangle(
+      chargeBarX + chargeBarWidth / 2,
+      chargeBarY,
+      chargeBarWidth,
+      chargeBarHeight,
+      0x333333,
+      0.7
+    );
+    this.chargeBarBg.setOrigin(0.5, 0.5);
+    this.chargeBarBg.setVisible(true);
+
+    // Полоса прогресса
+    this.chargeBar = this.add.rectangle(
+      chargeBarX,
+      chargeBarY,
+      0,
+      chargeBarHeight,
+      0x00ff00,
+      0.9
+    );
+    this.chargeBar.setOrigin(0, 0.5);
+    this.chargeBar.setVisible(true);
+
+    // Текст с процентом
+    this.chargeText = this.add.text(
+      chargeBarX + chargeBarWidth / 2,
+      chargeBarY,
+      "0%",
+      {
+        fontSize: "18px",
+        fill: "#ffffff",
+        fontFamily: "Arial",
+        fontStyle: "bold",
+      }
+    );
+    this.chargeText.setOrigin(0.5, 0.5);
+    this.chargeText.setVisible(true);
+
     // Управление
     this.input.keyboard.on("keydown-SPACE", this.startJump, this);
     this.input.keyboard.on("keyup-SPACE", this.endJump, this);
@@ -311,6 +356,39 @@ class GameScene extends Phaser.Scene {
     if (!this.isGameActive) return;
     this.isPointerDown = false;
     this.isSpaceDown = false;
+  }
+
+  // Обновление визуального индикатора зарядки
+  updateChargeIndicator() {
+    if (!this.chargeBar || !this.chargeBarBg || !this.chargeText) return;
+
+    const chargeBarWidth = 200;
+    const chargeBarHeight = 20;
+    const chargeBarX = this.scale.width / 2 - chargeBarWidth / 2;
+    const chargeBarY = this.scale.height - 100;
+    const centerX = this.scale.width / 2;
+
+    // Обновляем позицию фона (центрируем)
+    this.chargeBarBg.setPosition(centerX, chargeBarY);
+
+    // Обновляем ширину полосы прогресса (от 0 до chargeBarWidth)
+    const currentWidth = chargeBarWidth * this.jumpCharge;
+    this.chargeBar.setSize(currentWidth, chargeBarHeight);
+    this.chargeBar.setPosition(chargeBarX, chargeBarY);
+
+    // Обновляем цвет полосы в зависимости от зарядки (зеленый -> желтый -> красный)
+    let color = 0x00ff00; // Зеленый
+    if (this.jumpCharge > 0.66) {
+      color = 0xff0000; // Красный при высокой зарядке
+    } else if (this.jumpCharge > 0.33) {
+      color = 0xffff00; // Желтый при средней зарядке
+    }
+    this.chargeBar.setFillStyle(color, 0.9);
+
+    // Обновляем позицию и текст с процентом
+    this.chargeText.setPosition(centerX, chargeBarY);
+    const percentage = Math.round(this.jumpCharge * 100);
+    this.chargeText.setText(`${percentage}%`);
   }
 
   // Выполнение прыжка с заданной силой
@@ -814,6 +892,9 @@ class GameScene extends Phaser.Scene {
         this.chargeTimer = 0;
       }
     }
+
+    // Всегда обновляем визуальный индикатор (даже когда зарядка не активна, чтобы показывать 0%)
+    this.updateChargeIndicator();
 
     // Сохраняем текущее состояние для следующего кадра
     this.wasPointerDown = pointerIsDown;

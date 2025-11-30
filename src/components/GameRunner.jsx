@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Phaser from "phaser";
 import "./Game.css";
 import packageJson from "../../package.json";
+import MapGenerator from "./MapGenerator";
 
 // Версия приложения
 const APP_VERSION = packageJson.version;
@@ -16,9 +17,10 @@ const PLATFORM_SPAWN_INTERVAL = 3000;
 const WALL_SPAWN_INTERVAL = 6000; // Интервал появления вертикальных стен
 const PLAYER_WIDTH = 40;
 const PLAYER_HEIGHT = 60;
-const PLATFORM_WIDTH = 80;
+const PLATFORM_WIDTH = 150;
 const PLATFORM_HEIGHT = 15;
 const PLATFORM_MIN_DISTANCE = 200; // Минимальное расстояние между платформами
+const JUMP_FORWARD_SPEED = 150; // Скорость движения вперед при прыжке
 const WALL_WIDTH = 400; // Ширина вертикальной стены (увеличена для новой логики)
 const WALL_GAP_MIN = PLAYER_HEIGHT * 4; // Минимальный размер отверстия (два персонажа)
 const WALL_GAP_MAX = PLAYER_HEIGHT * 6; // Максимальный размер отверстия (три персонажа)
@@ -58,6 +60,12 @@ class GameScene extends Phaser.Scene {
     this.returnToPositionTimer = 0; // Таймер задержки перед возвратом в исходную позицию
     this.returnDelay = 1000; // Задержка перед возвратом (мс) - 1 секунда
     this.returnSpeed = 100; // Скорость возврата (пикселей в секунду)
+    this.useSavedMap = false; // Флаг использования сохраненной карты
+    this.jumpForwardDeceleration = 300; // Замедление движения вперед после прыжка (пикселей в секунду в секунду)
+    this.mapData = null; // Данные сохраненной карты
+    this.mapObstaclesCreated = false; // Флаг создания препятствий из карты
+    this.mapProgress = 0; // Прогресс прохождения карты (в пикселях)
+    this.spawnedObstacles = new Set(); // Множество уже созданных препятствий из карты
   }
 
   init(data) {
@@ -172,8 +180,108 @@ class GameScene extends Phaser.Scene {
     this.input.keyboard.on("keydown-SPACE", this.jump, this);
     this.input.on("pointerdown", this.jump, this);
 
+    // Проверяем наличие сохраненной карты в localStorage
+    try {
+      const savedMap = localStorage.getItem("gameMap");
+      if (savedMap) {
+        this.mapData = JSON.parse(savedMap);
+        this.useSavedMap = true;
+        console.log("Загружена карта из localStorage:", this.mapData);
+        // Создаем препятствия из сохраненной карты
+        this.createMapObstacles();
+      } else {
+        console.log("Карта в localStorage не найдена, используется динамическая генерация");
+        this.useSavedMap = false;
+      }
+    } catch (error) {
+      console.error("Ошибка при загрузке карты из localStorage:", error);
+      this.useSavedMap = false;
+    }
+
     // Убеждаемся, что физика активна (на случай перезапуска)
     this.physics.resume();
+  }
+
+  // Создание препятствий из сохраненной карты (динамически по мере продвижения)
+  createMapObstacles() {
+    if (!this.mapData || !this.mapData.obstacles) return;
+
+    const { width, height } = this.scale;
+    const groundY = height * 0.6;
+
+    // Создаем препятствия, которые должны появиться на экране
+    // Препятствие должно появиться, когда его позиция в карте находится в пределах видимой области
+    const spawnRange = width * 1.5; // Создаем препятствия заранее (на 1.5 ширины экрана вперед)
+    
+    this.mapData.obstacles.forEach((obstacle, index) => {
+      const obstacleKey = `obstacle_${index}`;
+      
+      // Проверяем, не создано ли уже это препятствие
+      if (this.spawnedObstacles.has(obstacleKey)) return;
+
+      // Вычисляем, должна ли появиться препятствие
+      // Препятствие появляется справа от экрана, когда его позиция в карте близка к текущему прогрессу
+      const obstaclePositionInMap = obstacle.x;
+      const distanceFromProgress = obstaclePositionInMap - this.mapProgress;
+      
+      // Если препятствие должно появиться (в пределах spawnRange справа от экрана)
+      if (distanceFromProgress >= -width && distanceFromProgress <= spawnRange) {
+        // Вычисляем позицию на экране: препятствие появляется справа от экрана
+        // Если distanceFromProgress > 0, препятствие еще не достигло экрана, создаем его справа
+        // Если distanceFromProgress <= 0, препятствие уже должно быть видно, но мы его создаем на правом краю
+        const screenX = width + Math.max(0, distanceFromProgress);
+        
+        if (obstacle.type === "platform") {
+          // Создаем платформу
+          const platform = this.platforms.create(screenX, obstacle.y, "platform");
+          platform.setVelocityX(-OBSTACLE_SPEED);
+          platform.body.setSize(PLATFORM_WIDTH, PLATFORM_HEIGHT);
+          platform.body.setGravityY(0);
+          platform.body.setAllowGravity(false);
+          platform.body.setImmovable(true);
+          platform.setCollideWorldBounds(false);
+          // Сохраняем оригинальную позицию в карте для отслеживания
+          platform.mapX = obstacle.x;
+          this.spawnedObstacles.add(obstacleKey);
+        } else if (obstacle.type === "wall") {
+          // Создаем стену
+          this.createWallFromMap(screenX, height, groundY, obstacle.gapTop, obstacle.gapSize, obstacleKey);
+        }
+      }
+    });
+  }
+
+  // Создание стены из данных карты
+  createWallFromMap(x, height, groundY, gapTop, gapSize, obstacleKey) {
+    // Верхняя часть стены
+    const topWallHeight = gapTop;
+    if (topWallHeight > 20) {
+      const topWall = this.walls.create(x, 0, "wall");
+      topWall.setOrigin(0, 0);
+      topWall.setDisplaySize(WALL_WIDTH, topWallHeight);
+      topWall.setVelocityX(-OBSTACLE_SPEED);
+      topWall.body.allowGravity = false;
+      topWall.body.setImmovable(true);
+      topWall.setCollideWorldBounds(false);
+    }
+
+    // Нижняя часть стены
+    const gapBottom = gapTop + gapSize;
+    const bottomWallHeight = groundY - gapBottom;
+    if (bottomWallHeight > 20) {
+      const bottomWall = this.walls.create(x, gapBottom, "wall");
+      bottomWall.setOrigin(0, 0);
+      bottomWall.setDisplaySize(WALL_WIDTH, bottomWallHeight);
+      bottomWall.setVelocityX(-OBSTACLE_SPEED);
+      bottomWall.body.allowGravity = false;
+      bottomWall.body.setImmovable(true);
+      bottomWall.setCollideWorldBounds(false);
+    }
+    
+    // Отмечаем препятствие как созданное
+    if (obstacleKey) {
+      this.spawnedObstacles.add(obstacleKey);
+    }
   }
 
   jump() {
@@ -192,6 +300,9 @@ class GameScene extends Phaser.Scene {
     if (this.jumpCount < this.maxJumps) {
       // Устанавливаем начальную скорость прыжка
       this.player.setVelocityY(JUMP_STRENGTH);
+      // Добавляем движение вперед при прыжке
+      const currentVelocityX = this.player.body.velocity.x;
+      this.player.setVelocityX(currentVelocityX + JUMP_FORWARD_SPEED);
       // Запускаем ускорение прыжка для контроля скорости набора высоты
       // Ускорение будет применяться в update() через прямое изменение скорости
       this.isJumpAccelerating = true;
@@ -522,6 +633,9 @@ class GameScene extends Phaser.Scene {
     this.fixedVelocityY = null;
     this.debugLogTimer = 0;
     this.returnToPositionTimer = 0; // Сбрасываем таймер возврата в исходную позицию
+    this.mapObstaclesCreated = false; // Сбрасываем флаг создания препятствий из карты
+    this.mapProgress = 0; // Сбрасываем прогресс по карте
+    this.spawnedObstacles = new Set(); // Очищаем множество созданных препятствий
     // Убеждаемся, что гравитация включена при сбросе состояния
     if (this.player && this.player.body) {
       const worldGravity = this.physics.world.gravity.y;
@@ -805,9 +919,16 @@ class GameScene extends Phaser.Scene {
       
       // В этой игре персонаж должен быть неподвижен по X (скорость = 0)
       // Но если он был заблокирован препятствием и теперь не касается его, убеждаемся что скорость = 0
-      if (Math.abs(velocityX) > 0.1 && !isTouchingLeft && !isTouchingRight) {
-        // Персонаж движется по X, но не касается препятствий - сбрасываем скорость
+      // НО: не сбрасываем скорость во время прыжка (когда персонаж в воздухе)
+      const isInAir = !isTouchingDown && Math.abs(velocityY) > 10;
+      if (Math.abs(velocityX) > 0.1 && !isTouchingLeft && !isTouchingRight && !isInAir) {
+        // Персонаж движется по X, но не касается препятствий и не в воздухе - сбрасываем скорость
         this.player.setVelocityX(0);
+      } else if (isInAir && velocityX > 0) {
+        // Персонаж в воздухе и движется вперед - применяем замедление
+        const deceleration = (this.jumpForwardDeceleration * delta) / 1000;
+        const newVelocityX = Math.max(0, velocityX - deceleration);
+        this.player.setVelocityX(newVelocityX);
       }
     }
 
@@ -880,7 +1001,52 @@ class GameScene extends Phaser.Scene {
     const { width, height } = this.scale;
     const groundY = height * 0.6;
 
-    // Создание платформ
+    // Если используется сохраненная карта, не генерируем препятствия динамически
+    if (this.useSavedMap) {
+      // Обновляем прогресс по карте (препятствия движутся навстречу игроку)
+      this.mapProgress += (OBSTACLE_SPEED * delta) / 1000;
+      
+      // Создаем новые препятствия из карты по мере продвижения
+      this.createMapObstacles();
+      
+      // Удаление объектов за экраном и подсчет счета
+      this.platforms.children.entries.forEach((platform) => {
+        if (platform.x + PLATFORM_WIDTH < 0) {
+          platform.destroy();
+        }
+      });
+
+      // Удаление стен за экраном и подсчет счета
+      let wallPassed = false;
+      this.walls.children.entries.forEach((wall) => {
+        if (wall.x + WALL_WIDTH < 0) {
+          // Проверяем, прошел ли игрок через стену (отверстие)
+          if (
+            wall.x + WALL_WIDTH < this.player.x &&
+            wall.x + WALL_WIDTH >= this.player.x - 10 &&
+            !wallPassed
+          ) {
+            wallPassed = true;
+            this.scoreValue++;
+            if (this.onScoreUpdate) {
+              this.onScoreUpdate(this.scoreValue);
+            }
+            this.scoreText.setText(`Счет: ${this.scoreValue}`);
+          }
+          wall.destroy();
+        }
+      });
+      
+      // Проверяем, закончилась ли карта
+      if (this.mapData && this.mapProgress >= this.mapData.length) {
+        // Карта закончилась - можно показать сообщение или завершить уровень
+        console.log("Карта пройдена!");
+      }
+      
+      return; // Прерываем выполнение, не генерируя новые препятствия
+    }
+
+    // Создание платформ (динамическая генерация)
     this.platformSpawnTimer += delta;
     if (this.platformSpawnTimer >= PLATFORM_SPAWN_INTERVAL) {
       // Проверяем, не будет ли создана стена в ближайшее время
@@ -1074,6 +1240,7 @@ function GameRunner() {
   const [isGameStarted, setIsGameStarted] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
   const [score, setScore] = useState(0);
+  const [showMapGenerator, setShowMapGenerator] = useState(false);
 
   // Функция для переворота персонажа
   const handleFlip = useCallback(() => {
@@ -1242,7 +1409,15 @@ function GameRunner() {
       </div>
 
       <div className="game-area">
-        {!isGameStarted ? (
+        {showMapGenerator ? (
+          <MapGenerator
+            onSave={() => {
+              setShowMapGenerator(false);
+              alert("Карта сохранена! Теперь она будет использоваться при запуске игры.");
+            }}
+            onCancel={() => setShowMapGenerator(false)}
+          />
+        ) : !isGameStarted ? (
           <div className="game-menu">
             <div className="game-menu-content">
               <h2 className="game-menu-title">Бегун</h2>
@@ -1253,6 +1428,16 @@ function GameRunner() {
 
               <button className="game-menu-button" onClick={handleStart}>
                 Старт
+              </button>
+              <button
+                className="game-menu-button"
+                onClick={() => setShowMapGenerator(true)}
+                style={{
+                  backgroundColor: "#17a2b8",
+                  marginTop: "10px",
+                }}
+              >
+                Генератор карты
               </button>
             </div>
           </div>

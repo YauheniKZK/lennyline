@@ -8,16 +8,16 @@ const APP_VERSION = packageJson.version;
 
 // Константы игры
 const NEEDLE_WIDTH = 160; // Длина иголки (горизонтальная)
-const NEEDLE_HEIGHT = 5; // Ширина иголки (узкая)
+const NEEDLE_HEIGHT = 4; // Ширина иголки (узкая)
 const NEEDLE_SPEED = 250; // Скорость движения иголки влево/вправо (уменьшена для точности)
 const NEEDLE_ACCELERATION = 1200; // Ускорение иголки (для плавного движения)
 const NEEDLE_DECELERATION = 1000; // Замедление иголки (для точной остановки)
 const NEEDLE_BOOST_MAX_MULTIPLIER = 3.0; // Максимальный коэффициент увеличения скорости
 const NEEDLE_BOOST_TIME_TO_MAX = 1000; // Время (мс) для достижения максимального ускорения
-const WALL_SPEED = 300; // Скорость движения стен
+const WALL_SPEED = 200; // Скорость движения стен
 const WALL_SPAWN_INTERVAL = 6000; // Интервал появления стен (мс)
 const WALL_WIDTH = 500; // Ширина стены (узкая, вертикальная)
-const GAP_SIZE = 30; // Размер зазора между стенами (маленький)
+const GAP_SIZE = 6; // Размер зазора между стенами (маленький)
 const WALL_MIN_HEIGHT = 100; // Минимальная высота части стены
 
 // Класс игровой сцены Phaser
@@ -37,6 +37,10 @@ class NeedleGameScene extends Phaser.Scene {
     this.buttonDownPressed = false;
     this.buttonUpHoldTime = 0; // Время удержания кнопки вверх (мс)
     this.buttonDownHoldTime = 0; // Время удержания кнопки вниз (мс)
+    this.nextGapY = null; // Позиция зазора следующей стены
+    this.gapHintGraphics = null; // Графические элементы подсказок
+    this.wallIdCounter = 0; // Счетчик для уникальных ID стен
+    this.passedWalls = new Set(); // Множество пройденных стен
   }
 
   init(data) {
@@ -102,7 +106,7 @@ class NeedleGameScene extends Phaser.Scene {
     this.input.on("pointerdown", this.moveUp, this);
 
     // Текст счета
-    this.scoreText = this.add.text(20, 20, "Счет: 0", {
+    this.scoreText = this.add.text(20, 20, "Пройдено стен: 0", {
       fontSize: "24px",
       fill: "#000",
       fontFamily: "Arial",
@@ -120,6 +124,12 @@ class NeedleGameScene extends Phaser.Scene {
       }
     );
     this.instructionText.setOrigin(0.5, 0.5);
+
+    // Создаем графические элементы для подсказок зазора
+    this.gapHintGraphics = this.add.graphics();
+
+    // Генерируем первый зазор
+    this.generateNextGap(height);
   }
 
   moveUp() {
@@ -161,12 +171,24 @@ class NeedleGameScene extends Phaser.Scene {
     this.physics.pause();
   }
 
-  // Создание вертикальной стены с горизонтальным зазором
-  createWall(x, height) {
-    // Генерируем случайную позицию зазора по вертикали
+  // Генерация следующего зазора
+  generateNextGap(height) {
     const minGapY = WALL_MIN_HEIGHT;
     const maxGapY = height - WALL_MIN_HEIGHT - GAP_SIZE;
-    const gapY = minGapY + Math.random() * (maxGapY - minGapY);
+    this.nextGapY = minGapY + Math.random() * (maxGapY - minGapY);
+  }
+
+  // Создание вертикальной стены с горизонтальным зазором
+  createWall(x, height) {
+    // Используем предварительно сгенерированную позицию зазора
+    const gapY = this.nextGapY;
+
+    // Генерируем следующий зазор для следующей стены
+    this.generateNextGap(height);
+
+    // Уникальный ID для этой стены
+    const wallId = this.wallIdCounter++;
+    const wallX = x; // Сохраняем начальную позицию X для отслеживания
 
     // Верхняя часть стены (вертикальная)
     const topWallHeight = gapY;
@@ -178,6 +200,8 @@ class NeedleGameScene extends Phaser.Scene {
       topWall.body.allowGravity = false;
       topWall.body.setImmovable(true);
       topWall.setCollideWorldBounds(false);
+      topWall.wallId = wallId; // Присваиваем ID
+      topWall.wallX = wallX; // Сохраняем позицию стены
     }
 
     // Нижняя часть стены (вертикальная)
@@ -191,7 +215,70 @@ class NeedleGameScene extends Phaser.Scene {
       bottomWall.body.allowGravity = false;
       bottomWall.body.setImmovable(true);
       bottomWall.setCollideWorldBounds(false);
+      bottomWall.wallId = wallId; // Присваиваем тот же ID
+      bottomWall.wallX = wallX; // Сохраняем позицию стены
     }
+  }
+
+  // Отображение подсказок зазора
+  updateGapHints(width) {
+    if (!this.gapHintGraphics || this.nextGapY === null) return;
+
+    this.gapHintGraphics.clear();
+
+    // Позиция для отображения подсказок (правая часть экрана)
+    const hintX = width * 0.85;
+    const hintWidth = 30;
+    const gapTop = this.nextGapY;
+    const gapBottom = this.nextGapY + GAP_SIZE;
+
+    // Верхняя граница зазора - пунктирная линия
+    this.gapHintGraphics.lineStyle(2, 0x4caf50, 0.7);
+    this.gapHintGraphics.beginPath();
+    for (let x = hintX; x < hintX + hintWidth; x += 4) {
+      this.gapHintGraphics.moveTo(x, gapTop - 10);
+      this.gapHintGraphics.lineTo(
+        Math.min(x + 2, hintX + hintWidth),
+        gapTop - 10
+      );
+    }
+    this.gapHintGraphics.strokePath();
+
+    // Нижняя граница зазора - пунктирная линия
+    this.gapHintGraphics.beginPath();
+    for (let x = hintX; x < hintX + hintWidth; x += 4) {
+      this.gapHintGraphics.moveTo(x, gapBottom + 10);
+      this.gapHintGraphics.lineTo(
+        Math.min(x + 2, hintX + hintWidth),
+        gapBottom + 10
+      );
+    }
+    this.gapHintGraphics.strokePath();
+
+    // Зона зазора - полупрозрачный прямоугольник
+    this.gapHintGraphics.fillStyle(0x4caf50, 0.3);
+    this.gapHintGraphics.fillRect(hintX, gapTop - 10, hintWidth, GAP_SIZE + 20);
+
+    // Стрелки указывающие на зазор
+    const arrowY = gapTop + GAP_SIZE / 2;
+    this.gapHintGraphics.lineStyle(2, 0x4caf50, 0.9);
+    // Левая стрелка
+    this.gapHintGraphics.beginPath();
+    this.gapHintGraphics.moveTo(hintX - 15, arrowY);
+    this.gapHintGraphics.lineTo(hintX - 5, arrowY);
+    this.gapHintGraphics.lineTo(hintX - 8, arrowY - 3);
+    this.gapHintGraphics.moveTo(hintX - 5, arrowY);
+    this.gapHintGraphics.lineTo(hintX - 8, arrowY + 3);
+    this.gapHintGraphics.strokePath();
+
+    // Правая стрелка
+    this.gapHintGraphics.beginPath();
+    this.gapHintGraphics.moveTo(hintX + hintWidth + 5, arrowY);
+    this.gapHintGraphics.lineTo(hintX + hintWidth + 15, arrowY);
+    this.gapHintGraphics.lineTo(hintX + hintWidth + 12, arrowY - 3);
+    this.gapHintGraphics.moveTo(hintX + hintWidth + 15, arrowY);
+    this.gapHintGraphics.lineTo(hintX + hintWidth + 12, arrowY + 3);
+    this.gapHintGraphics.strokePath();
   }
 
   // Сброс состояния
@@ -203,6 +290,11 @@ class NeedleGameScene extends Phaser.Scene {
     this.buttonDownPressed = false;
     this.buttonUpHoldTime = 0;
     this.buttonDownHoldTime = 0;
+    this.wallIdCounter = 0;
+    this.passedWalls.clear();
+    if (this.gapHintGraphics) {
+      this.gapHintGraphics.clear();
+    }
   }
 
   update(time, delta) {
@@ -301,6 +393,9 @@ class NeedleGameScene extends Phaser.Scene {
       this.needle.setVelocityY(0);
     }
 
+    // Обновление подсказок зазора
+    this.updateGapHints(width);
+
     // Создание стен (вертикальные стены с горизонтальными зазорами)
     this.wallSpawnTimer += delta;
     if (this.wallSpawnTimer >= WALL_SPAWN_INTERVAL) {
@@ -308,23 +403,25 @@ class NeedleGameScene extends Phaser.Scene {
       this.wallSpawnTimer = 0;
     }
 
-    // Удаление стен за экраном и подсчет счета
-    let wallPassed = false;
+    // Удаление стен за экраном и подсчет пройденных стен
     this.walls.children.entries.forEach((wall) => {
-      if (wall.x + wall.displayWidth < 0) {
-        // Проверяем, прошел ли игрок через стену (зазор)
-        if (
-          wall.x + wall.displayWidth < this.needle.x &&
-          wall.x + wall.displayWidth >= this.needle.x - 10 &&
-          !wallPassed
-        ) {
-          wallPassed = true;
-          this.scoreValue++;
-          if (this.onScoreUpdate) {
-            this.onScoreUpdate(this.scoreValue);
-          }
-          this.scoreText.setText(`Счет: ${this.scoreValue}`);
+      // Проверяем, прошла ли иголка через стену полностью
+      if (
+        wall.wallId !== undefined &&
+        wall.x + wall.displayWidth < this.needle.x &&
+        !this.passedWalls.has(wall.wallId)
+      ) {
+        // Стена пройдена
+        this.passedWalls.add(wall.wallId);
+        this.scoreValue++;
+        if (this.onScoreUpdate) {
+          this.onScoreUpdate(this.scoreValue);
         }
+        this.scoreText.setText(`Пройдено стен: ${this.scoreValue}`);
+      }
+
+      // Удаляем стену, если она полностью вышла за экран
+      if (wall.x + wall.displayWidth < -50) {
         wall.destroy();
       }
     });
@@ -344,7 +441,7 @@ function GameNeedle() {
   useEffect(() => {
     if (!isGameStarted || !gameRef.current) return;
 
-    const scaleFactor = 2.8;
+    const scaleFactor = 1.4;
     const gameWidth = gameRef.current.clientWidth * scaleFactor;
     const gameHeight = gameRef.current.clientHeight * scaleFactor;
 
@@ -735,7 +832,7 @@ function GameNeedle() {
               <div className="game-overlay" style={{ display: "flex" }}>
                 <div className="game-overlay-content">
                   <h2>Игра окончена!</h2>
-                  <p>Ваш счет: {score}</p>
+                  <p>Пройдено стен: {score}</p>
                   <div
                     style={{
                       display: "flex",
